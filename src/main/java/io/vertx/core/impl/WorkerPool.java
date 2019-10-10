@@ -16,6 +16,7 @@ import io.vertx.core.spi.metrics.PoolMetrics;
 import java.util.concurrent.ExecutorService;
 
 /**
+ * 封装线程池和统计组件
  * @author <a href="mailto:julien@julienviet.com">Julien Viet</a>
  */
 public class WorkerPool {

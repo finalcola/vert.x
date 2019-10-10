@@ -56,15 +56,18 @@ public class TaskQueue {
     runner = this::run;
   }
 
+  // 执行tasks队列中的任务
   private void run() {
     for (; ; ) {
       final Task task;
       synchronized (tasks) {
         task = tasks.poll();
+        // 执行完成，返回
         if (task == null) {
           current = null;
           return;
         }
+        // 执行线程池不同,将task添加到队列头,然后使用task的线程池执行该TaskQueue
         if (task.exec != current) {
           tasks.addFirst(task);
           task.exec.execute(runner);
@@ -72,6 +75,7 @@ public class TaskQueue {
           return;
         }
       }
+      // 直接执行
       try {
         task.runnable.run();
       } catch (Throwable t) {
@@ -82,12 +86,14 @@ public class TaskQueue {
 
   /**
    * Run a task.
+   * 添加到tasks
    *
    * @param task the task to run.
    */
   public void execute(Runnable task, Executor executor) {
     synchronized (tasks) {
       tasks.add(new Task(task, executor));
+      // 如果当前运行的线程池为null，则由该task的线程池运行
       if (current == null) {
         current = executor;
         executor.execute(runner);

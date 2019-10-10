@@ -89,6 +89,7 @@ public class VertxImpl implements VertxInternal, MetricsProvider {
     System.setProperty("io.netty.noJdkZlibDecoder", "false");
   }
 
+  // 创建VertxImpl并初始化
   static VertxImpl vertx(VertxOptions options, Transport transport) {
     VertxImpl vertx = new VertxImpl(options, transport);
     vertx.init();
@@ -107,28 +108,36 @@ public class VertxImpl implements VertxInternal, MetricsProvider {
   private final AtomicLong timeoutCounter = new AtomicLong(0);
   private final ClusterManager clusterManager;
   private final DeploymentManager deploymentManager;
+  // 用于文件资源读取
   private final FileResolver fileResolver;
   private final Map<ServerID, HttpServerImpl> sharedHttpServers = new HashMap<>();
   private final Map<ServerID, NetServerImpl> sharedNetServers = new HashMap<>();
   final WorkerPool workerPool;
   final WorkerPool internalBlockingPool;
+  // 线程工厂类
   private final ThreadFactory eventLoopThreadFactory;
   private final EventLoopGroup eventLoopGroup;
   private final EventLoopGroup acceptorEventLoopGroup;
+  // 检查线程是否阻塞的组件
   private final BlockedThreadChecker checker;
+  // 解析hostname
   private final AddressResolver addressResolver;
   private final AddressResolverOptions addressResolverOptions;
   private final EventBus eventBus;
   private volatile HAManager haManager;
   private boolean closed;
   private volatile Handler<Throwable> exceptionHandler;
-  private final Map<String, SharedWorkerPool> namedWorkerPools;
+  // 创建的线程池
+  private final Map<String/*poolName*/, SharedWorkerPool> namedWorkerPools;
+  // 默人线程池大小
   private final int defaultWorkerPoolSize;
   private final long maxWorkerExecTime;
   private final TimeUnit maxWorkerExecTimeUnit;
   private final long maxEventLoopExecTime;
   private final TimeUnit maxEventLoopExecTimeUnit;
+  // 管理关闭时的hook组件
   private final CloseHooks closeHooks;
+  // 用于创建EventLoop、配置Bootstrap等
   private final Transport transport;
   final VertxTracer tracer;
 
@@ -138,8 +147,10 @@ public class VertxImpl implements VertxInternal, MetricsProvider {
       log.warn("You're already on a Vert.x context, are you sure you want to create a new Vertx instance?");
     }
     closeHooks = new CloseHooks(log);
+    // 默认2s
     maxEventLoopExecTime = options.getMaxEventLoopExecuteTime();
     maxEventLoopExecTimeUnit = options.getMaxEventLoopExecuteTimeUnit();
+    // 检查线程是否阻塞
     checker = new BlockedThreadChecker(options.getBlockedThreadCheckInterval(), options.getBlockedThreadCheckIntervalUnit(), options.getWarningExceptionTime(), options.getWarningExceptionTimeUnit());
     eventLoopThreadFactory = new VertxThreadFactory("vert.x-eventloop-thread-", checker, false, maxEventLoopExecTime, maxEventLoopExecTimeUnit);
     eventLoopGroup = transport.eventLoopGroup(Transport.IO_EVENT_LOOP_GROUP, options.getEventLoopPoolSize(), eventLoopThreadFactory, NETTY_IO_RATIO);
@@ -1117,6 +1128,7 @@ public class VertxImpl implements VertxInternal, MetricsProvider {
     if (maxExecuteTime < 1) {
       throw new IllegalArgumentException("maxExecuteTime must be > 0");
     }
+    // 根据poolName创建共享线程池，并存储到namedWorkerPools
     SharedWorkerPool sharedWorkerPool = namedWorkerPools.get(name);
     if (sharedWorkerPool == null) {
       ExecutorService workerExec = Executors.newFixedThreadPool(poolSize, new VertxThreadFactory(name + "-", checker, true, maxExecuteTime, maxExecuteTimeUnit));

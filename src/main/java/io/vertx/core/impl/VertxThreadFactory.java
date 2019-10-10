@@ -16,12 +16,14 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
+ * 线程工厂类
  * @author <a href="http://tfox.org">Tim Fox</a>
  */
 public class VertxThreadFactory implements ThreadFactory {
 
   private final String prefix;
   private final AtomicInteger threadCount = new AtomicInteger(0);
+  // 检查线程阻塞的组件
   private final BlockedThreadChecker checker;
   private final boolean worker;
   private final long maxExecTime;
@@ -36,9 +38,11 @@ public class VertxThreadFactory implements ThreadFactory {
   }
 
   public Thread newThread(Runnable runnable) {
+    // 新建线程
     VertxThread t = new VertxThread(runnable, prefix + threadCount.getAndIncrement(), worker, maxExecTime, maxExecTimeUnit);
     // Vert.x threads are NOT daemons - we want them to prevent JVM exit so embededd user doesn't
     // have to explicitly prevent JVM from exiting.
+    // 注册到checker，检查阻塞实际
     if (checker != null) {
       checker.registerThread(t, t);
     }

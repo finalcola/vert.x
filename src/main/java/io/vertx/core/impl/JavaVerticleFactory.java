@@ -27,15 +27,19 @@ public class JavaVerticleFactory implements VerticleFactory {
 
   @Override
   public Verticle createVerticle(String verticleName, ClassLoader classLoader) throws Exception {
+    // 移除verticleName中的prefix前缀
     verticleName = VerticleFactory.removePrefix(verticleName);
     Class clazz;
     if (verticleName.endsWith(".java")) {
+      // 编译java文件后，加载
       CompilingClassLoader compilingLoader = new CompilingClassLoader(classLoader, verticleName);
       String className = compilingLoader.resolveMainClassName();
       clazz = compilingLoader.loadClass(className);
     } else {
+      // 加载class
       clazz = classLoader.loadClass(verticleName);
     }
+    // 新建Verticle
     return (Verticle) clazz.newInstance();
   }
 

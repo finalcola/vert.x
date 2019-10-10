@@ -59,22 +59,28 @@ public class DeploymentManager {
   private final VertxInternal vertx;
   private final Map<String, Deployment> deployments = new ConcurrentHashMap<>();
   private final Map<String, IsolatingClassLoader> classloaders = new HashMap<>();
-  private final Map<String, List<VerticleFactory>> verticleFactories = new ConcurrentHashMap<>();
+  private final Map<String/*prefix*/, List<VerticleFactory>> verticleFactories = new ConcurrentHashMap<>();
   private final List<VerticleFactory> defaultFactories = new ArrayList<>();
 
   public DeploymentManager(VertxInternal vertx) {
     this.vertx = vertx;
+    // 加载VerticleFactory并初始化
     loadVerticleFactories();
   }
 
+  // 加载VerticleFactory并初始化
   private void loadVerticleFactories() {
+    // SPI加载
     Collection<VerticleFactory> factories = ServiceHelper.loadFactories(VerticleFactory.class);
+    // 注册VerticleFactory到verticleFactories
     factories.forEach(this::registerVerticleFactory);
+    // 注册默认的VerticleFactory
     VerticleFactory defaultFactory = new JavaVerticleFactory();
     defaultFactory.init(vertx);
     defaultFactories.add(defaultFactory);
   }
 
+  // UUID
   private String generateDeploymentID() {
     return UUID.randomUUID().toString();
   }
@@ -94,8 +100,10 @@ public class DeploymentManager {
     }
     ContextInternal currentContext = vertx.getOrCreateContext();
     ClassLoader cl = getClassLoader(options);
+    // 创建verticle的数量,默认为1
     int nbInstances = options.getInstances();
     Set<Verticle> verticles = Collections.newSetFromMap(new IdentityHashMap<>());
+    // 创建verticle
     for (int i = 0; i < nbInstances; i++) {
       Verticle verticle;
       try {
@@ -114,6 +122,7 @@ public class DeploymentManager {
       }
       verticles.add(verticle);
     }
+    // 存在verticle创建失败
     if (verticles.size() != nbInstances) {
       if (completionHandler != null) {
         completionHandler.handle(Future.failedFuture("Same verticle supplied more than once"));
@@ -122,9 +131,11 @@ public class DeploymentManager {
     }
     Verticle[] verticlesArray = verticles.toArray(new Verticle[verticles.size()]);
     String verticleClass = verticlesArray[0].getClass().getName();
+    // 部署verticle
     doDeploy("java:" + verticleClass, options, currentContext, currentContext, completionHandler, cl, verticlesArray);
   }
 
+  // 部署verticle
   public void deployVerticle(String identifier,
                              DeploymentOptions options,
                              Handler<AsyncResult<String>> completionHandler) {
@@ -293,11 +304,14 @@ public class DeploymentManager {
     }
   }
 
+  // 注册VerticleFactory到verticleFactories
   public void registerVerticleFactory(VerticleFactory factory) {
+    // 工厂prefix
     String prefix = factory.prefix();
     if (prefix == null) {
       throw new IllegalArgumentException("factory.prefix() cannot be null");
     }
+    // 添加到prefix对应的list
     List<VerticleFactory> facts = verticleFactories.get(prefix);
     if (facts == null) {
       facts = new ArrayList<>();
@@ -309,6 +323,7 @@ public class DeploymentManager {
     facts.add(factory);
     // Sort list in ascending order
     facts.sort((fact1, fact2) -> fact1.order() - fact2.order());
+    // 初始化
     factory.init(vertx);
   }
 
@@ -379,28 +394,35 @@ public class DeploymentManager {
   /**
    * <strong>IMPORTANT</strong> - Isolation groups are not supported on Java 9+ because the application classloader is not
    * an URLClassLoader anymore. Thus we can't extract the list of jars to configure the IsolatedClassLoader.
-   *
    */
   private ClassLoader getClassLoader(DeploymentOptions options) {
+    // 默认为null
     String isolationGroup = options.getIsolationGroup();
     ClassLoader cl;
     if (isolationGroup == null) {
+      // 加载当前的classLoader
       cl = getCurrentClassLoader();
     } else {
       // IMPORTANT - Isolation groups are not supported on Java 9+, because the system classloader is not an URLClassLoader
       // anymore. Thus we can't extract the paths from the classpath and isolate the loading.
       synchronized (this) {
+        // classLoader隔离
         IsolatingClassLoader icl = classloaders.get(isolationGroup);
         if (icl == null) {
+          // 创建该isolationGroup对应的IsolatingClassLoader
+
+          // 获取当前classLoader
           ClassLoader current = getCurrentClassLoader();
           if (!(current instanceof URLClassLoader)) {
             throw new IllegalStateException("Current classloader must be URLClassLoader");
           }
+
+          // 解析配置的extraClassPath
           List<URL> urls = new ArrayList<>();
           // Add any extra URLs to the beginning of the classpath
           List<String> extraClasspath = options.getExtraClasspath();
           if (extraClasspath != null) {
-            for (String pathElement: extraClasspath) {
+            for (String pathElement : extraClasspath) {
               File file = new File(pathElement);
               try {
                 URL url = file.toURI().toURL();
@@ -411,10 +433,11 @@ public class DeploymentManager {
             }
           }
           // And add the URLs of the Vert.x classloader
-          URLClassLoader urlc = (URLClassLoader)current;
+          // 添加当前已加载的urls
+          URLClassLoader urlc = (URLClassLoader) current;
           urls.addAll(Arrays.asList(urlc.getURLs()));
 
-          // Create an isolating cl with the urls
+          // 创建IsolatingClassLoader
           icl = new IsolatingClassLoader(urls.toArray(new URL[urls.size()]), getCurrentClassLoader(),
             options.getIsolatedClasses());
           classloaders.put(isolationGroup, icl);
@@ -426,6 +449,7 @@ public class DeploymentManager {
     return cl;
   }
 
+  // CurrentThreadClassLoader - classLoader
   private ClassLoader getCurrentClassLoader() {
     ClassLoader cl = Thread.currentThread().getContextClassLoader();
     if (cl == null) {
@@ -469,14 +493,19 @@ public class DeploymentManager {
     String poolName = options.getWorkerPoolName();
 
     Deployment parent = parentContext.getDeployment();
+    // UUID
     String deploymentID = generateDeploymentID();
+    // 新建DeploymentImpl
     DeploymentImpl deployment = new DeploymentImpl(parent, deploymentID, identifier, options);
 
     AtomicInteger deployCount = new AtomicInteger();
     AtomicBoolean failureReported = new AtomicBoolean();
+    // 部署verticle
     for (Verticle verticle: verticles) {
+      // poolName对应的线程池
       WorkerExecutorInternal workerExec = poolName != null ? vertx.createSharedWorkerExecutor(poolName, options.getWorkerPoolSize(), options.getMaxWorkerExecuteTime(), options.getMaxWorkerExecuteTimeUnit()) : null;
       WorkerPool pool = workerExec != null ? workerExec.getPool() : null;
+
       ContextImpl context = (ContextImpl) (options.isWorker() ? vertx.createWorkerContext(deployment, pool, tccl) :
         vertx.createEventLoopContext(deployment, pool, tccl));
       if (workerExec != null) {

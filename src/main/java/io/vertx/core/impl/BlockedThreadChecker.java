@@ -41,6 +41,7 @@ public class BlockedThreadChecker {
   private final Timer timer; // Need to use our own timer - can't use event loop for this
 
   BlockedThreadChecker(long interval, TimeUnit intervalUnit, long warningExceptionTime, TimeUnit warningExceptionTimeUnit) {
+    // 新建timer，周期性检查阻塞线程
     timer = new Timer("vertx-blocked-thread-checker", true);
     timer.schedule(new TimerTask() {
       @Override
@@ -48,16 +49,24 @@ public class BlockedThreadChecker {
         synchronized (BlockedThreadChecker.this) {
           long now = System.nanoTime();
           for (Map.Entry<Thread, Task> entry : threads.entrySet()) {
+            // 线程开启时间
             long execStart = entry.getValue().startTime();
+            // 运行时间
             long dur = now - execStart;
+            // 执行时间
             final long timeLimit = entry.getValue().maxExecTime();
             TimeUnit maxExecTimeUnit = entry.getValue().maxExecTimeUnit();
+            // 运行时间
             long val = maxExecTimeUnit.convert(dur, TimeUnit.NANOSECONDS);
+            // 运行时间超过maxExecTime
             if (execStart != 0 && val >= timeLimit) {
               final String message = "Thread " + entry.getKey() + " has been blocked for " + (dur / 1_000_000) + " ms, time limit is " + TimeUnit.MILLISECONDS.convert(timeLimit, maxExecTimeUnit) + " ms";
+              // 运行时间小于warningExceptionTimeUnit
               if (warningExceptionTimeUnit.convert(dur, TimeUnit.NANOSECONDS) <= warningExceptionTime) {
+                // 打印线程阻塞时间的日志
                 log.warn(message);
               } else {
+                // 打印线程阻塞时间的日志并打印调用栈
                 VertxException stackTrace = new VertxException("Thread blocked");
                 stackTrace.setStackTrace(entry.getKey().getStackTrace());
                 log.warn(message, stackTrace);
@@ -69,6 +78,7 @@ public class BlockedThreadChecker {
     }, intervalUnit.toMillis(interval), intervalUnit.toMillis(interval));
   }
 
+  // 注册线程
   synchronized void registerThread(Thread thread, Task checked) {
     threads.put(thread, checked);
   }

@@ -64,7 +64,7 @@
       <dependency>
         <groupId>io.vertx</groupId>
         <artifactId>vertx-dependencies</artifactId>
-        <version>${stack.version}</version>
+        <version>4.0.0-milestone3</version>
         <type>pom</type>
         <scope>import</scope>
       </dependency>

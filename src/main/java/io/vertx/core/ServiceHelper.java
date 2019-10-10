@@ -15,12 +15,14 @@ import java.util.*;
 
 /**
  * A helper class for loading factories from the classpath and from the vert.x OSGi bundle.
+ * SPI机制
  *
  * @author <a href="http://tfox.org">Tim Fox</a>
  */
 public class ServiceHelper {
 
   public static <T> T loadFactory(Class<T> clazz) {
+    // SPI加载
     T factory = loadFactoryOrNull(clazz);
     if (factory == null) {
       throw new IllegalStateException("Cannot find META-INF/services/" + clazz.getName() + " on classpath");
@@ -28,6 +30,7 @@ public class ServiceHelper {
     return factory;
   }
 
+  // 通过JDK的SPI机制加载class的实现类
   public static <T> T loadFactoryOrNull(Class<T> clazz) {
     Collection<T> collection = loadFactories(clazz);
     if (!collection.isEmpty()) {
@@ -38,13 +41,16 @@ public class ServiceHelper {
   }
 
 
+  // 通过JDK的SPI机制加载class的实现类
   public static <T> Collection<T> loadFactories(Class<T> clazz) {
     return loadFactories(clazz, null);
   }
 
+  // 通过JDK的SPI机制加载class的实现类
   public static <T> Collection<T> loadFactories(Class<T> clazz, ClassLoader classLoader) {
     List<T> list = new ArrayList<>();
     ServiceLoader<T> factories;
+    // 通过JDK的SPI机制加载
     if (classLoader != null) {
       factories = ServiceLoader.load(clazz, classLoader);
     } else {
@@ -52,6 +58,7 @@ public class ServiceHelper {
       // ServiceLoader.load(clazz, TCCL);
       factories = ServiceLoader.load(clazz);
     }
+    // 结果添加到list并返回
     if (factories.iterator().hasNext()) {
       factories.iterator().forEachRemaining(list::add);
       return list;

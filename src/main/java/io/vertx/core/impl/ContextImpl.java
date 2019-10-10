@@ -177,12 +177,15 @@ abstract class ContextImpl extends AbstractContext {
         }
         fut.setHandler(ar -> {
           if (resultHandler != null) {
+            // 执行成功
             context.runOnContext(v -> resultHandler.handle(ar));
           } else if (ar.failed()) {
+            // 处理异常
             context.reportException(ar.cause());
           }
         });
       };
+      // taskQueue或者workPool执行
       Executor exec = workerPool.executor();
       if (queue != null) {
         queue.execute(command, exec);
@@ -224,6 +227,7 @@ abstract class ContextImpl extends AbstractContext {
     return localData;
   }
 
+  // 处理异常
   public void reportException(Throwable t) {
     Handler<Throwable> handler = exceptionHandler;
     if (handler == null) {

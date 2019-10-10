@@ -108,12 +108,14 @@ abstract class AbstractContext implements ContextInternal {
     dispatch(null, task);
   }
 
+  // 开始分发，记录开始时间
   public final ContextInternal beginDispatch() {
     ContextInternal prev;
     Thread th = Thread.currentThread();
     if (th instanceof VertxThread) {
       prev = ((VertxThread)th).beginDispatch(this);
     } else {
+      // netty线程处理
       prev = beginNettyThreadDispatch(th);
     }
     if (!DISABLE_TCCL) {
@@ -127,6 +129,7 @@ abstract class AbstractContext implements ContextInternal {
       Holder holder = holderLocal.get();
       ContextInternal prev = holder.ctx;
       if (!ContextImpl.DISABLE_TIMINGS) {
+        // 注册checker
         if (holder.checker == null) {
           BlockedThreadChecker checker = owner().blockedThreadChecker();
           holder.checker = checker;
@@ -134,6 +137,7 @@ abstract class AbstractContext implements ContextInternal {
           holder.maxExecTimeUnit = owner().maxEventLoopExecTimeUnit();
           checker.registerThread(th, holder);
         }
+        // 记录开始时间
         if (holder.ctx == null) {
           holder.startTime = System.nanoTime();
         }
@@ -141,10 +145,12 @@ abstract class AbstractContext implements ContextInternal {
       holder.ctx = this;
       return prev;
     } else {
+      // 执行线程错误
       throw new IllegalStateException("Uh oh! context executing with wrong thread! " + th);
     }
   }
 
+  // 结束分发，记录时间并还原context
   public final void endDispatch(ContextInternal prev) {
     Thread th = Thread.currentThread();
     if (!DISABLE_TCCL) {
@@ -173,12 +179,16 @@ abstract class AbstractContext implements ContextInternal {
 
   @Override
   public final <T> void dispatch(T arg, Handler<T> task) {
+    // 分发前，记录信息
     ContextInternal prev = beginDispatch();
+    // 执行task
     try {
       task.handle(arg);
     } catch (Throwable t) {
+      // 记录异常
       reportException(t);
     } finally {
+      // 分发结束，记录信息并还原context
       endDispatch(prev);
     }
   }

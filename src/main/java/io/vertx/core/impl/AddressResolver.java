@@ -42,21 +42,26 @@ public class AddressResolver {
 
   private static final Pattern NDOTS_OPTIONS_PATTERN = resolvOption("ndots:[ \\t\\f]*(\\d)+");
   private static final Pattern ROTATE_OPTIONS_PATTERN = resolvOption("rotate");
+  // 解析/etc/resolv.conf文件中ndots配置
   public static final int DEFAULT_NDOTS_RESOLV_OPTION;
+  // /etc/resolv.conf文件中是否包含rotate
   public static final boolean DEFAULT_ROTATE_RESOLV_OPTION;
 
   static {
     int ndots = 1;
     boolean rotate = false;
     if (ExecUtils.isLinux()) {
+      // DNS配置文件
       File f = new File("/etc/resolv.conf");
       try {
         if (f.exists() && f.isFile()) {
           String conf = new String(Files.readAllBytes(f.toPath()));
+          // 解析/etc/resolv.conf文件中ndots配置
           int ndotsOption = parseNdotsOptionFromResolvConf(conf);
           if (ndotsOption != -1) {
             ndots = ndotsOption;
           }
+          // /etc/resolv.conf文件中是否包含rotate
           rotate = parseRotateOptionFromResolvConf(conf);
         }
       } catch (Throwable t) {
@@ -101,6 +106,7 @@ public class AddressResolver {
     provider.close(doneHandler);
   }
 
+  // 解析/etc/resolv.conf文件中ndots配置
   public static int parseNdotsOptionFromResolvConf(String s) {
     int ndots = -1;
     Matcher matcher = NDOTS_OPTIONS_PATTERN.matcher(s);
@@ -110,6 +116,7 @@ public class AddressResolver {
     return ndots;
   }
 
+  // /etc/resolv.conf文件中是否包含rotate
   public static boolean parseRotateOptionFromResolvConf(String s) {
     Matcher matcher = ROTATE_OPTIONS_PATTERN.matcher(s);
     return matcher.find();

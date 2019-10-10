@@ -83,6 +83,7 @@ public final class VertxThread extends FastThreadLocalThread implements BlockedT
    * @return the current context that shall be restored
    */
   ContextInternal beginDispatch(ContextInternal context) {
+    // 记录开始时间
     if (!ContextImpl.DISABLE_TIMINGS) {
       executeStart();
     }

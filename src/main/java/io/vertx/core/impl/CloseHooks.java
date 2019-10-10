@@ -29,6 +29,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 class CloseHooks {
 
   private final Logger log;
+  // 是否已经调用过hook
   private boolean closeHooksRun;
   private Set<Closeable> closeHooks;
 
@@ -71,11 +72,13 @@ class CloseHooks {
   void run(Handler<AsyncResult<Void>> completionHandler) {
     Set<Closeable> copy = null;
     synchronized (this) {
+      // 已调用，异常
       if (closeHooksRun) {
         // Sanity check
         throw new IllegalStateException("Close hooks already run");
       }
       closeHooksRun = true;
+      // 保存hooks的备份
       if (closeHooks != null && !closeHooks.isEmpty()) {
         // Must copy before looping as can be removed during loop otherwise
         copy = new HashSet<>(closeHooks);
@@ -86,7 +89,9 @@ class CloseHooks {
       if (num != 0) {
         AtomicInteger count = new AtomicInteger();
         AtomicBoolean failed = new AtomicBoolean();
+        // 调用hook
         for (Closeable hook : copy) {
+          // 通过promise收集hook的执行成功或失败的次数
           Promise<Void> promise = Promise.promise();
           promise.future().setHandler(ar -> {
             if (ar.failed()) {
@@ -101,6 +106,7 @@ class CloseHooks {
               }
             }
           });
+          // 调用hook
           try {
             hook.close(promise);
           } catch (Throwable t) {

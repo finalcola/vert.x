@@ -60,8 +60,11 @@ public class FileResolver {
   private final File cwd;
   private File cacheDir;
   private Thread shutdownHook;
+  // 是否开启缓存
   private final boolean enableCaching;
+  // ClassPathResolvingEnabled
   private final boolean enableCpResolving;
+  // file cache目录
   private final String fileCacheDir;
 
   public FileResolver() {
@@ -84,12 +87,14 @@ public class FileResolver {
       cwd = null;
     }
     if (this.enableCpResolving) {
+      // 创建cacheDir
       setupCacheDir();
     }
   }
 
   /**
    * Close this file resolver, this is a blocking operation.
+   * 清除shutdownHook并删除cacheDir
    */
   public void close() throws IOException {
     synchronized (this) {
@@ -105,25 +110,29 @@ public class FileResolver {
   }
 
   public File resolveFile(String fileName) {
+    // 首先寻找cwd目录下的文件
     // First look for file with that name on disk
     File file = new File(fileName);
     if (cwd != null && !file.isAbsolute()) {
       file = new File(cwd, fileName);
     }
+    // 不支持ClassPath下的目录的话，直接返回
     if (!this.enableCpResolving) {
       return file;
     }
     // We need to synchronized here to avoid 2 different threads to copy the file to the cache directory and so
     // corrupting the content.
     synchronized (this) {
+      // 文件不存在，则需要从cacheDir或者classPath目录下寻找
       if (!file.exists()) {
-        // Look for it in local file cache
+        // cacheDir下查找
         File cacheFile = new File(cacheDir, fileName);
         if (this.enableCaching && cacheFile.exists()) {
           return cacheFile;
         }
-        // Look for file on classpath
+        // classpath下查找
         ClassLoader cl = getClassLoader();
+        // 处理文件分隔符
         if (NON_UNIX_FILE_SEP) {
           fileName = fileName.replace(FILE_SEP, "/");
         }
@@ -149,6 +158,7 @@ public class FileResolver {
     return file;
   }
 
+  // 解压资源，并复制到cacheDir
   private File unpackUrlResource(URL url, String fileName, ClassLoader cl, boolean isDir) {
     String prot = url.getProtocol();
     switch (prot) {
@@ -166,12 +176,14 @@ public class FileResolver {
     }
   }
 
-
+  // 将文件或文件夹复制一份到cacheDir
   private synchronized File unpackFromFileURL(URL url, String fileName, ClassLoader cl) {
     final File resource = new File(decodeURIComponent(url.getPath(), false));
     boolean isDirectory = resource.isDirectory();
+    // 将文件复制一份到cacheDir中
     File cacheFile = new File(cacheDir, fileName);
     if (!isDirectory) {
+      // 复制文件
       cacheFile.getParentFile().mkdirs();
       try {
         if (this.enableCaching) {
@@ -184,8 +196,10 @@ public class FileResolver {
         throw new VertxException(e);
       }
     } else {
+      // 复制文件夹
       cacheFile.mkdirs();
       String[] listing = resource.list();
+      // 递归复制文件夹内的文件
       for (String file: listing) {
         String subResource = fileName + "/" + file;
         URL url2 = cl.getResource(subResource);
@@ -207,6 +221,7 @@ public class FileResolver {
       if (idx2 == -1) {
         idx2 = path.lastIndexOf(".zip!", idx1 - 1);
       }
+      // 读取jar包文件
       if (idx2 == -1) {
         File file = new File(decodeURIComponent(path.substring(5, idx1 + 4), false));
         zip = new ZipFile(file);
@@ -224,6 +239,7 @@ public class FileResolver {
       }
       String prefix = prefixBuilder.toString();
 
+      // 解压，并复制到cacheDir
       Enumeration<? extends ZipEntry> entries = zip.entries();
       while (entries.hasMoreElements()) {
         ZipEntry entry = entries.nextElement();
@@ -325,6 +341,7 @@ public class FileResolver {
     return cl;
   }
 
+  // 创建CacheDir
   private void setupCacheDir() {
     String cacheDirName = fileCacheDir + "/file-cache-" + UUID.randomUUID().toString();
     cacheDir = new File(cacheDirName);
@@ -332,6 +349,7 @@ public class FileResolver {
       throw new IllegalStateException("Failed to create cache dir");
     }
     // Add shutdown hook to delete on exit
+    // shutdownHook: 删除缓存目录
     synchronized (this) {
       shutdownHook = new Thread(() -> {
         CountDownLatch latch = new CountDownLatch(1);

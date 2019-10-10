@@ -106,6 +106,7 @@ public class Transport {
     return null;
   }
 
+  // vertx的SocketAddress转换为JDK的SocketAddress
   public SocketAddress convert(io.vertx.core.net.SocketAddress address, boolean resolved) {
     if (address.path() != null) {
       throw new IllegalArgumentException("Domain socket not supported by JDK transport");
@@ -118,6 +119,7 @@ public class Transport {
     }
   }
 
+  // JDK的SocketAddress转换为vertx的SocketAddress
   public io.vertx.core.net.SocketAddress convert(SocketAddress address) {
     if (address instanceof InetSocketAddress) {
       return new SocketAddressImpl((InetSocketAddress) address);
@@ -138,6 +140,7 @@ public class Transport {
   }
 
   /**
+   * 新建Netty的NioEventLoopGroup
    * @param type one of {@link #ACCEPTOR_EVENT_LOOP_GROUP} or {@link #IO_EVENT_LOOP_GROUP}.
    * @param nThreads the number of threads that will be used by this instance.
    * @param threadFactory the ThreadFactory to use.
@@ -152,6 +155,7 @@ public class Transport {
   }
 
   /**
+   * 新建Netty的NioDatagramChannel
    * @return a new datagram channel
    */
   public DatagramChannel datagramChannel() {
@@ -159,6 +163,7 @@ public class Transport {
   }
 
   /**
+   * 创建IPv4或者IPv6的NioDatagramChannel
    * @return a new datagram channel
    */
   public DatagramChannel datagramChannel(InternetProtocolFamily family) {
@@ -173,6 +178,7 @@ public class Transport {
   }
 
   /**
+   * 创建NioSocketChannel的工厂类
    * @return the type for channel
    * @param domainSocket whether to create a unix domain channel or a socket channel
    */
@@ -184,6 +190,7 @@ public class Transport {
   }
 
   /**
+   * 创建NioServerSocketChannel的工厂类
    * @return the type for server channel
    * @param domainSocket whether to create a server unix domain channel or a regular server socket channel
    */
@@ -194,6 +201,7 @@ public class Transport {
     return NioServerSocketChannel::new;
   }
 
+  // 通过options配置DatagramChannel
   public void configure(DatagramChannel channel, DatagramSocketOptions options) {
     channel.config().setAllocator(PartialPooledByteBufAllocator.INSTANCE);
     if (options.getSendBufferSize() != -1) {
@@ -223,6 +231,7 @@ public class Transport {
     }
   }
 
+  // 配置Bootstrap
   public void configure(ClientOptionsBase options, boolean domainSocket, Bootstrap bootstrap) {
     if (!domainSocket) {
       bootstrap.option(ChannelOption.SO_REUSEADDR, options.isReuseAddress());
@@ -249,6 +258,7 @@ public class Transport {
     bootstrap.option(ChannelOption.ALLOCATOR, PartialPooledByteBufAllocator.INSTANCE);
   }
 
+  // 配置ServerBootstrap
   public void configure(NetServerOptions options, boolean domainSocket, ServerBootstrap bootstrap) {
     bootstrap.option(ChannelOption.SO_REUSEADDR, options.isReuseAddress());
     if (!domainSocket) {

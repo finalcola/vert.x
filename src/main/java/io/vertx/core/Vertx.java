@@ -631,6 +631,9 @@ public interface Vertx extends Measured {
   @GenIgnore
   @Nullable Handler<Throwable> exceptionHandler();
 
+  /**
+   * jdk SPI的机制加载VertxFactory
+   */
   @GenIgnore
   VertxFactory factory = ServiceHelper.loadFactory(VertxFactory.class);
 }
