@@ -112,9 +112,10 @@ public class VertxImpl implements VertxInternal, MetricsProvider {
   private final FileResolver fileResolver;
   private final Map<ServerID, HttpServerImpl> sharedHttpServers = new HashMap<>();
   private final Map<ServerID, NetServerImpl> sharedNetServers = new HashMap<>();
+  // 封装线程池
   final WorkerPool workerPool;
   final WorkerPool internalBlockingPool;
-  // 线程工厂类
+  // eventLoop线程工厂类
   private final ThreadFactory eventLoopThreadFactory;
   private final EventLoopGroup eventLoopGroup;
   private final EventLoopGroup acceptorEventLoopGroup;
@@ -152,6 +153,7 @@ public class VertxImpl implements VertxInternal, MetricsProvider {
     maxEventLoopExecTimeUnit = options.getMaxEventLoopExecuteTimeUnit();
     // 检查线程是否阻塞
     checker = new BlockedThreadChecker(options.getBlockedThreadCheckInterval(), options.getBlockedThreadCheckIntervalUnit(), options.getWarningExceptionTime(), options.getWarningExceptionTimeUnit());
+    // 用于创建EventLoop的线程工厂类
     eventLoopThreadFactory = new VertxThreadFactory("vert.x-eventloop-thread-", checker, false, maxEventLoopExecTime, maxEventLoopExecTimeUnit);
     eventLoopGroup = transport.eventLoopGroup(Transport.IO_EVENT_LOOP_GROUP, options.getEventLoopPoolSize(), eventLoopThreadFactory, NETTY_IO_RATIO);
     ThreadFactory acceptorEventLoopThreadFactory = new VertxThreadFactory("vert.x-acceptor-thread-", checker, false, options.getMaxEventLoopExecuteTime(), options.getMaxEventLoopExecuteTimeUnit());
@@ -428,6 +430,7 @@ public class VertxImpl implements VertxInternal, MetricsProvider {
     if (workerPool == null) {
       workerPool = this.workerPool;
     }
+    // 会传入deployment
     return new WorkerContext(this, tracer, internalBlockingPool, workerPool, deployment, tccl);
   }
 
@@ -474,10 +477,13 @@ public class VertxImpl implements VertxInternal, MetricsProvider {
     return null;
   }
 
+  // SPI加载VertxTracer
   private VertxTracer initializeTracer(VertxOptions options) {
     if (options.getTracingOptions() != null && options.getTracingOptions().isEnabled()) {
+      // 默认为空
       VertxTracerFactory factory = options.getTracingOptions().getFactory();
       if (factory == null) {
+        // SPI加载
         factory = ServiceHelper.loadFactoryOrNull(VertxTracerFactory.class);
         if (factory == null) {
           log.warn("Metrics has been set to enabled but no TracerFactory found on classpath");
@@ -692,6 +698,7 @@ public class VertxImpl implements VertxInternal, MetricsProvider {
       closed = this.closed;
     }
     if (closed) {
+      // 已关闭，部署失败
       if (completionHandler != null) {
         completionHandler.handle(Future.failedFuture("Vert.x closed"));
       }
@@ -940,6 +947,7 @@ public class VertxImpl implements VertxInternal, MetricsProvider {
       this.timerID = timerID;
       this.handler = runnable;
       this.periodic = periodic;
+      // 调度任务
       EventLoop el = context.nettyEventLoop();
       if (periodic) {
         future = el.scheduleAtFixedRate(this, delay, delay, TimeUnit.MILLISECONDS);

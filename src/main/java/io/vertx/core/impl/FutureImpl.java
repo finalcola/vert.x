@@ -67,6 +67,7 @@ class FutureImpl<T> implements Promise<T>, Future<T> {
 
   /**
    * Set a handler for the result. It will get called when it's complete
+   * 设置handler，当完成时会调用该handler
    */
   public Future<T> setHandler(Handler<AsyncResult<T>> handler) {
     boolean callHandler;
@@ -119,14 +120,17 @@ class FutureImpl<T> implements Promise<T>, Future<T> {
   public boolean tryComplete(T result) {
     Handler<AsyncResult<T>> h;
     synchronized (this) {
+      // 已经完成
       if (succeeded || failed) {
         return false;
       }
+      // 设置结果
       this.result = result;
       succeeded = true;
       h = handler;
       handler = null;
     }
+    // 调用handler
     if (h != null) {
       h.handle(this);
     }
@@ -162,11 +166,13 @@ class FutureImpl<T> implements Promise<T>, Future<T> {
       if (succeeded || failed) {
         return false;
       }
+      // 设置异常和标志
       this.throwable = cause != null ? cause : new NoStackTraceThrowable(null);
       failed = true;
       h = handler;
       handler = null;
     }
+    // 调用handler
     if (h != null) {
       h.handle(this);
     }

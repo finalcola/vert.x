@@ -35,13 +35,19 @@ public class DeploymentOptions {
   public static final int DEFAULT_INSTANCES = 1;
 
   private JsonObject config;
+  // 是否是worker，默认false
   private boolean worker;
+  // 隔离group，默认null
   private String isolationGroup;
+  // 工作线程池name，默认空
   private String workerPoolName;
+  // 工作线程池大小，默认20
   private int workerPoolSize;
   private long maxWorkerExecuteTime;
+  // 默认false
   private boolean ha;
   private List<String> extraClasspath;
+  // 默认实例数量为1
   private int instances;
   private List<String> isolatedClasses;
   private TimeUnit maxWorkerExecuteTimeUnit;

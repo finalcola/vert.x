@@ -18,6 +18,7 @@ import static io.vertx.core.Future.factory;
 
 /**
  * Represents the writable side of an action that may, or may not, have occurred yet.
+ * 提供设置结果和异常的功能，并调用handler
  * <p>
  * The {@link #future()} method returns the {@link Future} associated with a promise, the future
  * can be used for getting notified of the promise completion and retrieve its value.

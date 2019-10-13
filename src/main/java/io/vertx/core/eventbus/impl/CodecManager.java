@@ -46,6 +46,7 @@ public class CodecManager {
   public static final MessageCodec<ReplyException, ReplyException> REPLY_EXCEPTION_MESSAGE_CODEC = new ReplyExceptionMessageCodec();
 
   private final MessageCodec[] systemCodecs;
+  // 用户定义编码组件
   private final ConcurrentMap<String, MessageCodec> userCodecMap = new ConcurrentHashMap<>();
   private final ConcurrentMap<Class, MessageCodec> defaultCodecMap = new ConcurrentHashMap<>();
 
@@ -55,9 +56,12 @@ public class CodecManager {
       BOOLEAN_MESSAGE_CODEC, SHORT_MESSAGE_CODEC, CHAR_MESSAGE_CODEC, BYTE_MESSAGE_CODEC, REPLY_EXCEPTION_MESSAGE_CODEC);
   }
 
+  // 获取对应的codec组件
   public MessageCodec lookupCodec(Object body, String codecName) {
     MessageCodec codec;
+    // 根据body的类型获取codec组件
     if (codecName != null) {
+      // 用于自定义编码组件
       codec = userCodecMap.get(codecName);
       if (codec == null) {
         throw new IllegalArgumentException("No message codec for name: " + codecName);
@@ -96,6 +100,7 @@ public class CodecManager {
         codec = REPLY_EXCEPTION_MESSAGE_CODEC;
       }
     } else {
+      // defaultCodecMap中获取
       codec = defaultCodecMap.get(body.getClass());
       if (codec == null) {
         throw new IllegalArgumentException("No message codec for type: " + body.getClass());

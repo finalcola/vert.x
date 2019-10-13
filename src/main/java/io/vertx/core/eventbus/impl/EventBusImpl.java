@@ -52,6 +52,7 @@ public class EventBusImpl implements EventBus, MetricsProvider {
   private final AtomicLong replySequence = new AtomicLong(0);
   protected final VertxInternal vertx;
   protected final EventBusMetrics metrics;
+  // 保存messageConsumer对应的handler
   protected final ConcurrentMap<String, ConcurrentCyclicSequence<HandlerHolder>> handlerMap = new ConcurrentHashMap<>();
   protected final CodecManager codecManager = new CodecManager();
   protected volatile boolean started;
@@ -92,6 +93,7 @@ public class EventBusImpl implements EventBus, MetricsProvider {
     return this;
   }
 
+  // 设置标志位并调用completionHandler
   public synchronized void start(Handler<AsyncResult<Void>> completionHandler) {
     if (started) {
       throw new IllegalStateException("Already started");
@@ -168,7 +170,9 @@ public class EventBusImpl implements EventBus, MetricsProvider {
   @Override
   public <T> MessageConsumer<T> consumer(String address, Handler<Message<T>> handler) {
     Objects.requireNonNull(handler, "handler");
+    // 获取对应的MessageConsumer
     MessageConsumer<T> consumer = consumer(address);
+    // 绑定handler
     consumer.handler(handler);
     return consumer;
   }
@@ -236,6 +240,7 @@ public class EventBusImpl implements EventBus, MetricsProvider {
 
   public MessageImpl createMessage(boolean send, boolean src, String address, MultiMap headers, Object body, String codecName, Handler<AsyncResult<Void>> writeHandler) {
     Objects.requireNonNull(address, "no null address accepted");
+    // 获取解码组件
     MessageCodec codec = codecManager.lookupCodec(body, codecName);
     @SuppressWarnings("unchecked")
     MessageImpl msg = new MessageImpl(address, null, headers, body, codec, send, src, this, writeHandler);
@@ -245,6 +250,7 @@ public class EventBusImpl implements EventBus, MetricsProvider {
   protected <T> HandlerHolder<T> addRegistration(String address, HandlerRegistration<T> registration,
                                      boolean replyHandler, boolean localOnly) {
     Objects.requireNonNull(registration.getHandler(), "handler");
+    // 将handler封装为HandlerHolder，并注册到eventBus
     LocalRegistrationResult<T> result = addLocalRegistration(address, registration, replyHandler, localOnly);
     addRegistration(result.newAddress, address, replyHandler, localOnly, registration::setResult);
     return result.holder;
@@ -268,7 +274,7 @@ public class EventBusImpl implements EventBus, MetricsProvider {
   private <T> LocalRegistrationResult<T> addLocalRegistration(String address, HandlerRegistration<T> registration,
                                                            boolean replyHandler, boolean localOnly) {
     Objects.requireNonNull(address, "address");
-
+    // 获取当前线程下对应的Vert.x Context，如果获取不到则表明当前不在Verticle中(即Embedded)
     Context context = Vertx.currentContext();
     boolean hasContext = context != null;
     if (!hasContext) {
@@ -277,14 +283,17 @@ public class EventBusImpl implements EventBus, MetricsProvider {
     }
     registration.setHandlerContext(context);
 
+    // 使用HandlerHolder封装
     HandlerHolder<T> holder = new HandlerHolder<>(registration, replyHandler, localOnly, context);
 
+    // 注册到eventBus.handlerMap
     ConcurrentCyclicSequence<HandlerHolder> handlers = new ConcurrentCyclicSequence<HandlerHolder>().add(holder);
     ConcurrentCyclicSequence<HandlerHolder> actualHandlers = handlerMap.merge(
       address,
       handlers,
       (old, prev) -> old.add(prev.first()));
 
+    // 用于取消注册
     if (hasContext) {
       HandlerEntry entry = new HandlerEntry<>(address, registration);
       context.addCloseHook(entry);
@@ -334,16 +343,20 @@ public class EventBusImpl implements EventBus, MetricsProvider {
     }
   }
 
+  // 发送响应
   protected <T> void sendReply(OutboundDeliveryContext<T> sendContext, MessageImpl replierMessage) {
     sendOrPub(sendContext);
   }
 
+  // 发送请求
   protected <T> void sendOrPub(OutboundDeliveryContext<T> sendContext) {
     sendLocally(sendContext);
   }
 
+  // 记录消息发送
   protected final Object messageSent(OutboundDeliveryContext<?> sendContext, boolean local, boolean remote) {
     MessageImpl msg = sendContext.message;
+    // 统计
     if (metrics != null) {
       MessageImpl message = msg;
       metrics.messageSent(message.address(), !message.send, local, remote);
@@ -366,7 +379,9 @@ public class EventBusImpl implements EventBus, MetricsProvider {
   }
 
   private <T> void sendLocally(OutboundDeliveryContext<T> sendContext) {
+    // 记录message发送信息
     Object trace = messageSent(sendContext, true, false);
+    // 发送message
     ReplyException failure = deliverMessageLocally(sendContext.message);
     if (failure != null) {
       // no handlers
@@ -396,17 +411,22 @@ public class EventBusImpl implements EventBus, MetricsProvider {
     return true;
   }
 
+  // 本地分发message，调用对应的handler
   protected ReplyException deliverMessageLocally(MessageImpl msg) {
     ConcurrentCyclicSequence<HandlerHolder> handlers = handlerMap.get(msg.address());
     if (handlers != null) {
+      // send方法，使用点对点通信
       if (msg.isSend()) {
-        //Choose one
+        // 选择一个handler
         HandlerHolder holder = handlers.next();
+        // 记录消息接收信息
         if (metrics != null) {
           metrics.messageReceived(msg.address(), !msg.isSend(), isMessageLocal(msg), holder != null ? 1 : 0);
         }
         if (holder != null) {
+          // 将message分发到handler进行处理
           deliverToHandler(msg, holder);
+          // 通知writeHandler
           Handler<AsyncResult<Void>> handler = msg.writeHandler;
           if (handler != null) {
             handler.handle(Future.succeededFuture());
@@ -415,7 +435,7 @@ public class EventBusImpl implements EventBus, MetricsProvider {
           // RACY issue !!!!!
         }
       } else {
-        // Publish
+        // Publish 广播
         if (metrics != null) {
           metrics.messageReceived(msg.address(), !msg.isSend(), isMessageLocal(msg), handlers.size());
         }
@@ -429,6 +449,7 @@ public class EventBusImpl implements EventBus, MetricsProvider {
       }
       return null;
     } else {
+      // handler为空，返回失败
       if (metrics != null) {
         metrics.messageReceived(msg.address(), !msg.isSend(), isMessageLocal(msg), 0);
       }
@@ -447,20 +468,24 @@ public class EventBusImpl implements EventBus, MetricsProvider {
     }
   }
 
+  // 创建唯一标识
   protected String generateReplyAddress() {
     return "__vertx.reply." + Long.toString(replySequence.incrementAndGet());
   }
 
+  // 创建ReplyHandler(复制处理回复)
   private <T> ReplyHandler<T> createReplyHandler(MessageImpl message,
                                                  boolean src,
                                                  DeliveryOptions options,
                                                  Handler<AsyncResult<Message<T>>> replyHandler) {
     if (replyHandler != null) {
       long timeout = options.getSendTimeout();
+      // 创建唯一标识
       String replyAddress = generateReplyAddress();
       message.setReplyAddress(replyAddress);
       HandlerRegistration<T> registration = new HandlerRegistration<>(vertx, metrics, this, replyAddress, message.address, true, src);
       ReplyHandler<T> handler = new ReplyHandler<>(registration, timeout);
+      // 设置回复处理方法
       handler.result.future().setHandler(replyHandler);
       registration.handler(handler);
       return handler;
@@ -479,6 +504,7 @@ public class EventBusImpl implements EventBus, MetricsProvider {
     ReplyHandler(HandlerRegistration<T> registration, long timeout) {
       this.result = Promise.promise();
       this.registration = registration;
+      // 添加超时任务
       this.timeoutID = vertx.setTimer(timeout, id -> {
         fail(new ReplyException(ReplyFailure.TIMEOUT, "Timed out after waiting " + timeout + "(ms) for a reply. address: " + registration.address + ", repliedAddress: " + registration.repliedAddress));
       });
@@ -492,22 +518,29 @@ public class EventBusImpl implements EventBus, MetricsProvider {
       }
     }
 
+    // 失败
     void fail(ReplyException failure) {
+      // 取消注册
       registration.unregister();
+      // 记录统计
       if (metrics != null) {
         metrics.replyFailure(registration.repliedAddress, failure.failureType());
       }
       trace(null, failure);
+      // promise失败
       result.tryFail(failure);
     }
 
     @Override
     public void handle(Message<T> reply) {
+      // 取消超时任务
       vertx.cancelTimer(timeoutID);
       if (reply.body() instanceof ReplyException) {
+        // 调用失败
         // This is kind of clunky - but hey-ho
         fail((ReplyException) reply.body());
       } else {
+        // 通知下游
         trace(reply, null);
         result.complete(reply);
       }
@@ -515,14 +548,17 @@ public class EventBusImpl implements EventBus, MetricsProvider {
   }
 
   public <T> void sendOrPubInternal(MessageImpl message, DeliveryOptions options,
-                                     Handler<AsyncResult<Message<T>>> replyHandler) {
+                                    Handler<AsyncResult<Message<T>>> replyHandler) {
+    // 检查是否已经启动
     checkStarted();
+    // 负责处理回复的handler
     ReplyHandler<T> handler = createReplyHandler(message, true, options, replyHandler);
     ContextInternal ctx = vertx.getContext();
     if (ctx == null) {
       // Guarantees the order when there is no current context in clustered mode
       ctx = sendNoContext;
     }
+    // 发送上下文
     OutboundDeliveryContext<T> sendContext = new OutboundDeliveryContext<>(ctx, message, options, handler);
     sendContext.next();
   }
@@ -532,6 +568,7 @@ public class EventBusImpl implements EventBus, MetricsProvider {
     public final ContextInternal ctx;
     public final MessageImpl message;
     public final DeliveryOptions options;
+    // sendInterceptors.iterator
     public final Iterator<Handler<DeliveryContext>> iter;
     public final ReplyHandler<T> replyHandler;
     private final MessageImpl replierMessage;
@@ -554,8 +591,10 @@ public class EventBusImpl implements EventBus, MetricsProvider {
       return message;
     }
 
+    // 调用消息拦截器，并发送message
     @Override
     public void next() {
+      // 调用sendInterceptors
       if (iter.hasNext()) {
         Handler<DeliveryContext> handler = iter.next();
         try {
@@ -569,13 +608,16 @@ public class EventBusImpl implements EventBus, MetricsProvider {
         }
       } else {
         if (replierMessage == null) {
+          // 发送请求
           sendOrPub(this);
         } else {
+          // 发送响应
           sendReply(this, replierMessage);
         }
       }
     }
 
+    // 是否是点对点模式
     @Override
     public boolean send() {
       return message.isSend();
@@ -604,14 +646,18 @@ public class EventBusImpl implements EventBus, MetricsProvider {
       metrics.scheduleMessage(holder.getHandler().getMetric(), msg.isLocal());
     }
 
+    // 在Vert.x Context中处理message
     holder.getContext().runOnContext((v) -> {
       // Need to check handler is still there - the handler might have been removed after the message were sent but
       // before it was received
       try {
+        // 检查handler是否已经被移除
         if (!holder.isRemoved()) {
+          // HandlerRegistration执行消息处理逻辑
           holder.getHandler().handle(copied);
         }
       } finally {
+        // 注销回复过的ReplyHandler
         if (holder.isReplyHandler()) {
           holder.getHandler().unregister();
         }

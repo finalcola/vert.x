@@ -673,15 +673,19 @@ public class FileSystemImpl implements FileSystem {
     return createTempFileInternal(dir, prefix, suffix, perms, null).perform();
   }
 
+  // FileResilver解析文件路径后，使用JDK的Files进行复制
   private BlockingAction<Void> copyInternal(String from, String to, CopyOptions options, Handler<AsyncResult<Void>> handler) {
     Objects.requireNonNull(from);
     Objects.requireNonNull(to);
     Objects.requireNonNull(options);
+    // 将vertx copy文件配置转换为java标准配置
     Set<CopyOption> copyOptionSet = toCopyOptionSet(options);
     CopyOption[] copyOptions = copyOptionSet.toArray(new CopyOption[copyOptionSet.size()]);
+    // 返回阻塞操作
     return new BlockingAction<Void>(handler) {
       public Void perform() {
         try {
+          // FileResilver解析文件路径后，使用JDK的Files进行复制
           Path source = vertx.resolveFile(from).toPath();
           Path target = vertx.resolveFile(to).toPath();
           Files.copy(source, target, copyOptions);
@@ -735,6 +739,7 @@ public class FileSystemImpl implements FileSystem {
     };
   }
 
+  // FileResilver解析文件路径后，使用JDK的Files进行移动文件
   private BlockingAction<Void> moveInternal(String from, String to, CopyOptions options, Handler<AsyncResult<Void>> handler) {
     Objects.requireNonNull(from);
     Objects.requireNonNull(to);
@@ -755,6 +760,7 @@ public class FileSystemImpl implements FileSystem {
     };
   }
 
+  // 通过RandomAccessFile截断文件
   private BlockingAction<Void> truncateInternal(String p, long len, Handler<AsyncResult<Void>> handler) {
     Objects.requireNonNull(p);
     return new BlockingAction<Void>(handler) {
@@ -1233,7 +1239,7 @@ public class FileSystemImpl implements FileSystem {
 
   }
 
-  // Visible for testing
+  // Visible for testing. 将vertx copy文件配置转换为java标准配置
   static Set<CopyOption> toCopyOptionSet(CopyOptions copyOptions) {
     Set<CopyOption> copyOptionSet = new HashSet<>();
     if (copyOptions.isReplaceExisting()) copyOptionSet.add(StandardCopyOption.REPLACE_EXISTING);

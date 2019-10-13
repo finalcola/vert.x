@@ -37,6 +37,7 @@ abstract class AbstractContext implements ContextInternal {
   private static final String THREAD_CHECKS_PROP_NAME = "vertx.threadChecks";
   private static final boolean THREAD_CHECKS = Boolean.getBoolean(THREAD_CHECKS_PROP_NAME);
 
+  // 获取线程绑定的Context
   static Context context() {
     Thread current = Thread.currentThread();
     if (current instanceof VertxThread) {
@@ -195,12 +196,14 @@ abstract class AbstractContext implements ContextInternal {
 
   @Override
   public final <T> void executeFromIO(T value, Handler<T> task) {
+    // 检查运行的线程是否是FastThreadLocalThread或work类型的VertxThread
     if (THREAD_CHECKS) {
       checkEventLoopThread();
     }
     execute(value, task);
   }
 
+  // 检查运行的线程是否是FastThreadLocalThread或work类型的VertxThread
   private void checkEventLoopThread() {
     Thread current = Thread.currentThread();
     if (!(current instanceof FastThreadLocalThread)) {
@@ -220,6 +223,7 @@ abstract class AbstractContext implements ContextInternal {
     }
   }
 
+  // 获取启动时的命令
   @Override
   public final List<String> processArgs() {
     // As we are maintaining the launcher and starter class, choose the right one.

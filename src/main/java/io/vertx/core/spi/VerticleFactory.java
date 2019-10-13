@@ -63,6 +63,7 @@ public interface VerticleFactory {
   }
 
   /**
+   * 如果createVerticle是阻塞任务或长时间运行的任务，则会使用workPool执行，而不是eventLoop
    * If the {@link #createVerticle(String, ClassLoader)} method might be slow Vert.x will call it using a worker
    * thread instead of an event loop if this returns true
    * @return true if {@link #createVerticle(String, ClassLoader)} should be called on a worker thread.

@@ -22,6 +22,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p/>
  * The internal counter uses a volatile index, so it can be incremented concurrently by several
  * threads without locking.
+ * 内部保存一个对象数组，使用循环计数的方式获取
  *
  * @author <a href="http://tfox.org">Tim Fox</a>
  * @author <a href="mailto:julien@julienviet.com">Julien Viet</a>

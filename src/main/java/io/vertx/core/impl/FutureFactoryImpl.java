@@ -20,6 +20,7 @@ import io.vertx.core.spi.FutureFactory;
  */
 public class FutureFactoryImpl implements FutureFactory {
 
+  // 表示成功的future，result为null
   private static final SucceededFuture EMPTY = new SucceededFuture<>(null);
 
   @Override

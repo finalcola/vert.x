@@ -42,6 +42,7 @@ class WorkerContext extends ContextImpl {
     execute(this, value ,task);
   }
 
+  // 使用taskQueue执行
   private <T> void execute(ContextInternal ctx, T value, Handler<T> task) {
     PoolMetrics metrics = workerPool.metrics();
     Object queueMetric = metrics != null ? metrics.submitted() : null;

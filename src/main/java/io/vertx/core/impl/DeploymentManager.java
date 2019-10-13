@@ -57,7 +57,8 @@ public class DeploymentManager {
   private static final Logger log = LoggerFactory.getLogger(DeploymentManager.class);
 
   private final VertxInternal vertx;
-  private final Map<String, Deployment> deployments = new ConcurrentHashMap<>();
+  // 保存创建的Deployment
+  private final Map<String/*UUID*/, Deployment> deployments = new ConcurrentHashMap<>();
   private final Map<String, IsolatingClassLoader> classloaders = new HashMap<>();
   private final Map<String/*prefix*/, List<VerticleFactory>> verticleFactories = new ConcurrentHashMap<>();
   private final List<VerticleFactory> defaultFactories = new ArrayList<>();
@@ -141,9 +142,6 @@ public class DeploymentManager {
                              Handler<AsyncResult<String>> completionHandler) {
     ContextInternal callingContext = vertx.getOrCreateContext();
     ClassLoader cl = getClassLoader(options);
-
-
-
     doDeployVerticle(identifier, options, callingContext, callingContext, cl, completionHandler);
   }
 
@@ -153,6 +151,7 @@ public class DeploymentManager {
                                 ContextInternal callingContext,
                                 ClassLoader cl,
                                 Handler<AsyncResult<String>> completionHandler) {
+    // 获取加载Verticle的工厂类
     List<VerticleFactory> verticleFactories = resolveFactories(identifier);
     Iterator<VerticleFactory> iter = verticleFactories.iterator();
     doDeployVerticle(iter, null, identifier, options, parentContext, callingContext, cl, completionHandler);
@@ -169,6 +168,7 @@ public class DeploymentManager {
     if (iter.hasNext()) {
       VerticleFactory verticleFactory = iter.next();
       Promise<String> promise = Promise.promise();
+      // 如果需要，对identifier进行处理
       if (verticleFactory.requiresResolve()) {
         try {
           verticleFactory.resolve(identifier, options, cl, promise);
@@ -182,12 +182,16 @@ public class DeploymentManager {
       } else {
         promise.complete(identifier);
       }
+      // identifier处理后，部署Verticle
       promise.future().setHandler(ar -> {
         Throwable err;
         if (ar.succeeded()) {
+          // identifier处理后的结果
           String resolvedName = ar.result();
+          // identifier更新后不同
           if (!resolvedName.equals(identifier)) {
             try {
+              // 部署Verticle（递归调用）
               deployVerticle(resolvedName, options, completionHandler);
             } catch (Exception e) {
               if (completionHandler != null) {
@@ -197,23 +201,27 @@ public class DeploymentManager {
             return;
           } else {
             if (verticleFactory.blockingCreate()) {
+              // 使用workPool创建
               vertx.<Verticle[]>executeBlocking(createFut -> {
                 try {
+                  // 通过verticleFactory创建Verticle
                   Verticle[] verticles = createVerticles(verticleFactory, identifier, options.getInstances(), cl);
                   createFut.complete(verticles);
                 } catch (Exception e) {
                   createFut.fail(e);
                 }
-              }, res -> {
+              }, res -> { // 创建结果的回调
                 if (res.succeeded()) {
+                  // 创建成功，进行部署
                   doDeploy(identifier, options, parentContext, callingContext, completionHandler, cl, res.result());
                 } else {
-                  // Try the next one
+                  // 失败，尝试下一个VerticleFactory进行创建
                   doDeployVerticle(iter, res.cause(), identifier, options, parentContext, callingContext, cl, completionHandler);
                 }
               });
               return;
             } else {
+              // 在eventLoop中创建
               try {
                 Verticle[] verticles = createVerticles(verticleFactory, identifier, options.getInstances(), cl);
                 doDeploy(identifier, options, parentContext, callingContext, completionHandler, cl, verticles);
@@ -239,6 +247,7 @@ public class DeploymentManager {
     }
   }
 
+  // 通过verticleFactory创建Verticle
   private Verticle[] createVerticles(VerticleFactory verticleFactory, String identifier, int instances, ClassLoader cl) throws Exception {
     Verticle[] verticles = new Verticle[instances];
     for (int i = 0; i < instances; i++) {
@@ -368,6 +377,7 @@ public class DeploymentManager {
     */
     List<VerticleFactory> factoryList = null;
     int pos = identifier.indexOf(':');
+    // java or js...
     String lookup = null;
     if (pos != -1) {
       // Infer factory from prefix, e.g. "java:" or "js:"
@@ -467,12 +477,14 @@ public class DeploymentManager {
     }
   }
 
+  // verticle部署完成，调用completionHandler
   private <T> void reportSuccess(T result, Context context, Handler<AsyncResult<T>> completionHandler) {
     if (completionHandler != null) {
       reportResult(context, completionHandler, Future.succeededFuture(result));
     }
   }
 
+  // verticle部署完成，调用completionHandler
   private <T> void reportResult(Context context, Handler<AsyncResult<T>> completionHandler, AsyncResult<T> result) {
     context.runOnContext(v -> {
       try {
@@ -506,17 +518,22 @@ public class DeploymentManager {
       WorkerExecutorInternal workerExec = poolName != null ? vertx.createSharedWorkerExecutor(poolName, options.getWorkerPoolSize(), options.getMaxWorkerExecuteTime(), options.getMaxWorkerExecuteTimeUnit()) : null;
       WorkerPool pool = workerExec != null ? workerExec.getPool() : null;
 
+      // 创建运行上下文(根据配置，判断使用eventLoop还是workPool,默认eventLoop)
       ContextImpl context = (ContextImpl) (options.isWorker() ? vertx.createWorkerContext(deployment, pool, tccl) :
         vertx.createEventLoopContext(deployment, pool, tccl));
       if (workerExec != null) {
         context.addCloseHook(workerExec);
       }
+      // 记录verticle
       deployment.addVerticle(new VerticleHolder(verticle, context));
+      // 新建context内运行verticle
       context.runOnContext(v -> {
         try {
+          // 初始化
           verticle.init(vertx, context);
           Promise<Void> startPromise = Promise.promise();
           Future<Void> startFuture = startPromise.future();
+          // 调用start方法
           verticle.start(startPromise);
           startFuture.setHandler(ar -> {
             if (ar.succeeded()) {
@@ -529,15 +546,19 @@ public class DeploymentManager {
                   return;
                 }
               }
+              // 统计部署信息
               VertxMetrics metrics = vertx.metricsSPI();
               if (metrics != null) {
                 metrics.verticleDeployed(verticle);
               }
+              // 记录deployment
               deployments.put(deploymentID, deployment);
+              // 已经全部部署，调用completionHandler
               if (deployCount.incrementAndGet() == verticles.length) {
                 reportSuccess(deploymentID, callingContext, completionHandler);
               }
             } else if (failureReported.compareAndSet(false, true)) {
+              // 回滚，取消子Deployment的部署
               deployment.rollback(callingContext, completionHandler, context, ar.cause());
             }
           });
@@ -589,12 +610,16 @@ public class DeploymentManager {
       if (status == ST_DEPLOYED) {
         status = ST_UNDEPLOYING;
         doUndeployChildren(callingContext, childrenResult -> {
+          // children rollback完成是回调
           synchronized (DeploymentImpl.this) {
+            // 更新状态
             status = ST_UNDEPLOYED;
           }
+          // 取消失败，
           if (childrenResult.failed()) {
             reportFailure(cause, callingContext, completionHandler);
           } else {
+            // 调用closeHooks
             context.runCloseHooks(closeHookAsyncResult -> reportFailure(cause, callingContext, completionHandler));
           }
         });
@@ -607,6 +632,7 @@ public class DeploymentManager {
       doUndeploy(currentContext, completionHandler);
     }
 
+    // 取消部署children
     private synchronized void doUndeployChildren(ContextInternal undeployingContext, Handler<AsyncResult<Void>> completionHandler) {
       if (!children.isEmpty()) {
         final int size = children.size();

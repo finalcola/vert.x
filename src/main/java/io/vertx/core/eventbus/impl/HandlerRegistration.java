@@ -55,6 +55,7 @@ public class HandlerRegistration<T> implements MessageConsumer<T>, Handler<Messa
   private Handler<Void> endHandler;
   private Handler<Message<T>> discardHandler;
   private int maxBufferedMessages = DEFAULT_MAX_BUFFERED_MESSAGES;
+  // 缓冲区
   private final Queue<Message<T>> pending = new ArrayDeque<>(8);
   private long demand = Long.MAX_VALUE;
   private Object metric;
@@ -120,6 +121,7 @@ public class HandlerRegistration<T> implements MessageConsumer<T>, Handler<Messa
     }
   }
 
+  // 从eventBus取消注册
   @Override
   public void unregister() {
     doUnregister(null);
@@ -130,6 +132,7 @@ public class HandlerRegistration<T> implements MessageConsumer<T>, Handler<Messa
     doUnregister(completionHandler);
   }
 
+  // 从eventBus取消注册
   private void doUnregister(Handler<AsyncResult<Void>> doneHandler) {
     synchronized (this) {
       if (handler == null) {
@@ -184,6 +187,7 @@ public class HandlerRegistration<T> implements MessageConsumer<T>, Handler<Messa
   }
 
   public synchronized void setResult(AsyncResult<Void> result) {
+    // 设置result
     if (this.result != null) {
       return;
     }
@@ -191,6 +195,7 @@ public class HandlerRegistration<T> implements MessageConsumer<T>, Handler<Messa
     if (result.failed()) {
       log.error("Failed to propagate registration for handler " + handler + " and address " + address);
     } else {
+      // 统计信息后，异步调用completionHandler
       if (metrics != null) {
         metric = metrics.handlerRegistered(address, repliedAddress);
       }
@@ -207,8 +212,10 @@ public class HandlerRegistration<T> implements MessageConsumer<T>, Handler<Messa
         return;
       } else if (demand == 0L) {
         if (pending.size() < maxBufferedMessages) {
+          // 添加到缓冲区
           pending.add(message);
         } else {
+          // 丢弃消息
           if (discardHandler != null) {
             discardHandler.handle(message);
           } else {
@@ -217,6 +224,7 @@ public class HandlerRegistration<T> implements MessageConsumer<T>, Handler<Messa
         }
         return;
       } else {
+        // 添加到缓冲区，并获取缓冲区队头的消息
         if (pending.size() > 0) {
           pending.add(message);
           message = pending.poll();
@@ -228,20 +236,25 @@ public class HandlerRegistration<T> implements MessageConsumer<T>, Handler<Messa
       }
       ctx = handlerContext;
     }
+    // 消息处理
     deliver(theHandler, message, ctx);
   }
 
+  // 处理message
   private void deliver(Handler<Message<T>> theHandler, Message<T> message, ContextInternal context) {
     // Handle the message outside the sync block
     // https://bugs.eclipse.org/bugs/show_bug.cgi?id=473714
+    // 向creditsAddress发送消息（流控相关）
     String creditsAddress = message.headers().get(MessageProducerImpl.CREDIT_ADDRESS_HEADER_NAME);
     if (creditsAddress != null) {
       eventBus.send(creditsAddress, 1);
     }
+
     InboundDeliveryContext deliveryCtx = new InboundDeliveryContext((MessageImpl<?, T>) message, theHandler, context);
     deliveryCtx.context.dispatch(v -> {
       deliveryCtx.next();
     });
+    // 检查缓冲区中是否还存在消息等待处理，如果有则取出传递给handler处理
     checkNextTick();
   }
 
@@ -249,6 +262,7 @@ public class HandlerRegistration<T> implements MessageConsumer<T>, Handler<Messa
     return handlerContext;
   }
 
+  // 检查缓冲区中是否还存在消息等待处理，如果有则取出传递给handler处理
   private synchronized void checkNextTick() {
     // Check if there are more pending messages in the queue that can be processed next time around
     if (!pending.isEmpty() && demand > 0L) {
@@ -257,6 +271,7 @@ public class HandlerRegistration<T> implements MessageConsumer<T>, Handler<Messa
         Handler<Message<T>> theHandler;
         ContextInternal ctx;
         synchronized (HandlerRegistration.this) {
+          // 从缓冲区取出消息处理
           if (demand == 0L || (message = pending.poll()) == null) {
             return;
           }
@@ -266,6 +281,7 @@ public class HandlerRegistration<T> implements MessageConsumer<T>, Handler<Messa
           theHandler = handler;
           ctx = handlerContext;
         }
+        // 传递给handler进行处理
         deliver(theHandler, message, ctx);
       });
     }
@@ -278,11 +294,13 @@ public class HandlerRegistration<T> implements MessageConsumer<T>, Handler<Messa
     this.discardHandler = handler;
   }
 
+  // 设置处理message的handler，并注册到eventBus
   @Override
   public synchronized MessageConsumer<T> handler(Handler<Message<T>> h) {
     if (h != null) {
       synchronized (this) {
         handler = h;
+        // 注册consumer
         if (registered == null) {
           registered = eventBus.addRegistration(address, this, repliedAddress != null, localOnly);
         }
@@ -357,6 +375,7 @@ public class HandlerRegistration<T> implements MessageConsumer<T>, Handler<Messa
   protected class InboundDeliveryContext implements DeliveryContext<T> {
 
     private final MessageImpl<?, T> message;
+    // receiveInterceptors.iterator
     private final Iterator<Handler<DeliveryContext>> iter;
     private final Handler<Message<T>> handler;
     private final ContextInternal context;
@@ -375,6 +394,7 @@ public class HandlerRegistration<T> implements MessageConsumer<T>, Handler<Messa
 
     @Override
     public void next() {
+      // 调用receiveInterceptors
       if (iter.hasNext()) {
         try {
           Handler<DeliveryContext> handler = iter.next();
@@ -387,6 +407,9 @@ public class HandlerRegistration<T> implements MessageConsumer<T>, Handler<Messa
           log.error("Failure in interceptor", t);
         }
       } else {
+        // 处理message
+
+        // 是否本地处理
         boolean local = true;
         if (message instanceof ClusteredMessage) {
           // A bit hacky
@@ -396,9 +419,11 @@ public class HandlerRegistration<T> implements MessageConsumer<T>, Handler<Messa
           }
         }
         try {
+          // 统计
           if (metrics != null) {
             metrics.beginHandleMessage(metric, local);
           }
+          // 处理message
           VertxTracer tracer = handlerContext.tracer();
           if (tracer != null && !src) {
             Object trace = tracer.receiveRequest(context, message, message.isSend() ? "send" : "publish", message.headers, MessageTagExtractor.INSTANCE);
@@ -407,6 +432,7 @@ public class HandlerRegistration<T> implements MessageConsumer<T>, Handler<Messa
           } else {
             handler.handle(message);
           }
+          // 统计
           if (metrics != null) {
             metrics.endHandleMessage(metric, null);
           }

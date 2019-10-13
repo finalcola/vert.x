@@ -26,6 +26,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 
 /**
+ * 运行上下文，包括hooks、各类handlers、deployment、eventloop、data、taskQueue、classLoader
  * @author <a href="http://tfox.org">Tim Fox</a>
  */
 abstract class ContextImpl extends AbstractContext {
@@ -33,6 +34,7 @@ abstract class ContextImpl extends AbstractContext {
   /**
    * Execute the {@code task} disabling the thread-local association for the duration
    * of the execution. {@link Vertx#currentContext()} will return {@code null},
+   * 独立执行task，不会创建Vertx.context
    * @param task the task to execute
    * @throws IllegalStateException if the current thread is not a Vertx thread
    */
@@ -51,6 +53,7 @@ abstract class ContextImpl extends AbstractContext {
     }
   }
 
+  // 返回vertx的EventLoopGroup.next()
   private static EventLoop getEventLoop(VertxInternal vertx) {
     EventLoopGroup group = vertx.getEventLoopGroup();
     if (group != null) {
@@ -152,6 +155,7 @@ abstract class ContextImpl extends AbstractContext {
     executeBlocking(this, blockingCodeHandler, resultHandler, workerPool, queue);
   }
 
+  // 使用workPool执行阻塞代码
   static <T> void executeBlocking(ContextInternal context, Handler<Promise<T>> blockingCodeHandler,
       Handler<AsyncResult<T>> resultHandler,
       WorkerPool workerPool, TaskQueue queue) {
@@ -159,12 +163,14 @@ abstract class ContextImpl extends AbstractContext {
     Object queueMetric = metrics != null ? metrics.submitted() : null;
     try {
       Runnable command = () -> {
+        // 任务启动前，记录统计
         Object execMetric = null;
         if (metrics != null) {
           execMetric = metrics.begin(queueMetric);
         }
         Promise<T> res = Promise.promise();
         Future<T> fut = res.future();
+        // 在context中执行task
         context.dispatch(res, f -> {
           try {
             blockingCodeHandler.handle(res);
@@ -172,15 +178,17 @@ abstract class ContextImpl extends AbstractContext {
             res.tryFail(e);
           }
         });
+        // 任务执行结束，记录统计
         if (metrics != null) {
           metrics.end(execMetric, fut.succeeded());
         }
+        // 执行成功后调用endHandler或处理异常
         fut.setHandler(ar -> {
           if (resultHandler != null) {
             // 执行成功
             context.runOnContext(v -> resultHandler.handle(ar));
           } else if (ar.failed()) {
-            // 处理异常
+            // 通过exceptionHandler处理异常
             context.reportException(ar.cause());
           }
         });
@@ -227,7 +235,7 @@ abstract class ContextImpl extends AbstractContext {
     return localData;
   }
 
-  // 处理异常
+  // exceptionHandler或vertx.exceptionHandler处理异常
   public void reportException(Throwable t) {
     Handler<Throwable> handler = exceptionHandler;
     if (handler == null) {

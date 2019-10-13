@@ -11,18 +11,56 @@
 
 package examples;
 
+import io.vertx.core.AsyncResult;
+import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.VertxOptions;
-import io.vertx.core.eventbus.EventBus;
-import io.vertx.core.eventbus.EventBusOptions;
-import io.vertx.core.eventbus.MessageConsumer;
+import io.vertx.core.eventbus.*;
 import io.vertx.core.http.ClientAuth;
+import io.vertx.core.json.Json;
 import io.vertx.core.net.JksOptions;
+
+import java.util.HashMap;
 
 /**
  * Created by tim on 09/01/15.
  */
 public class EventBusExamples {
+
+  public static void main(String[] args) {
+    Vertx vertx = Vertx.vertx();
+
+    EventBus eventBus = vertx.eventBus();
+    Handler<Message<Object>> handler = new Handler<Message<Object>>() {
+      @Override
+      public void handle(Message<Object> event) {
+        System.out.println(event.body());
+        event.reply("world");
+      }
+    };
+    MessageConsumer<Object> consumer = eventBus.consumer("test");
+    consumer.handler(handler);
+    consumer.completionHandler(new Handler<AsyncResult<Void>>() {
+      @Override
+      public void handle(AsyncResult<Void> event) {
+        System.out.println(event.succeeded());
+      }
+    });
+    consumer.endHandler((v) -> consumer.handler(handler));
+    consumer.exceptionHandler(null);
+
+    eventBus.request("test", "hello", event -> {
+      if (event.succeeded()) {
+        System.out.println(event.result().body());
+      } else {
+        System.out.println(event.cause());
+      }
+    });
+    eventBus.send("test", "hello2");
+
+//    eventBus.close(null);
+//    vertx.close();
+  }
 
   public void example0_5(Vertx vertx) {
     EventBus eb = vertx.eventBus();

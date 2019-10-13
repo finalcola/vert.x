@@ -30,6 +30,11 @@ import io.vertx.core.streams.Pump;
  */
 public class HTTPExamples {
 
+  public static void main(String[] args) {
+    Vertx vertx = Vertx.vertx();
+    new HTTPExamples().example7_1(vertx);
+  }
+
   public void example1(Vertx vertx) {
 
     HttpServer server = vertx.createHttpServer();
