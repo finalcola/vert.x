@@ -34,6 +34,7 @@ import java.net.InetSocketAddress;
 /**
  * The logic for connecting to an host, this implementations performs a connection
  * to the host after resolving its internet address.
+ * 封装连接到host的逻辑,提供http连接
  *
  * See if we can replace that by a Netty handler sometimes.
  *
@@ -73,7 +74,9 @@ public final class ChannelProvider {
   }
 
   public void connect(SocketAddress remoteAddress, SocketAddress peerAddress, String serverName, boolean ssl, Handler<AsyncResult<Channel>> channelHandler) {
+    // 该handler作用是使用eventLoop线程执行传入的channelHandler
     Handler<AsyncResult<Channel>> handler = res -> {
+      // 创建连接完成后，通知handler回调
       if (Context.isOnEventLoopThread()) {
         channelHandler.handle(res);
       } else {
@@ -81,6 +84,7 @@ public final class ChannelProvider {
         context.nettyEventLoop().execute(() -> channelHandler.handle(res));
       }
     };
+    // 创建连接
     if (proxyOptions != null) {
       handleProxyConnect(remoteAddress, peerAddress, serverName, ssl, handler);
     } else {
@@ -90,6 +94,7 @@ public final class ChannelProvider {
 
   private void initSSL(SocketAddress peerAddress, String serverName, boolean ssl, Channel ch, Handler<AsyncResult<Channel>> channelHandler) {
     if (ssl) {
+      // 创建SSL层handler，支持HTTPs
       SslHandler sslHandler = new SslHandler(sslHelper.createEngine(context.owner(), peerAddress, serverName));
       sslHandler.setHandshakeTimeout(sslHelper.getSslHandshakeTimeout(), sslHelper.getSslHandshakeTimeoutUnit());
       ChannelPipeline pipeline = ch.pipeline();
@@ -98,6 +103,8 @@ public final class ChannelProvider {
         @Override
         public void userEventTriggered(ChannelHandlerContext ctx, Object evt) {
           if (evt instanceof SslHandshakeCompletionEvent) {
+            // 握手完成，通知app并通知回调（连接已创建）
+
             // Notify application
             SslHandshakeCompletionEvent completion = (SslHandshakeCompletionEvent) evt;
             if (completion.isSuccess()) {
@@ -128,14 +135,18 @@ public final class ChannelProvider {
     bootstrap.handler(new ChannelInitializer<Channel>() {
       @Override
       protected void initChannel(Channel ch) {
+        // 如果需要，添加SSL层
         initSSL(peerAddress, serverName, ssl, ch, channelHandler);
       }
     });
+    // netty连接server
     ChannelFuture fut = bootstrap.connect(vertx.transport().convert(remoteAddress, false));
     fut.addListener(res -> {
       if (res.isSuccess()) {
+        // 创建连接完
         connected(fut.channel(), ssl, channelHandler);
       } else {
+        // 通知回调
         channelHandler.handle(io.vertx.core.Future.failedFuture(res.cause()));
       }
     });
@@ -144,15 +155,17 @@ public final class ChannelProvider {
   /**
    * Signal we are connected to the remote server.
    *
-   * @param channel the channel
+   * @param channel        the channel
    * @param channelHandler the channel handler
    */
   private void connected(Channel channel, boolean ssl, Handler<AsyncResult<Channel>> channelHandler) {
+    // 保存channel，并通知回调
     this.channel = channel;
     if (!ssl) {
       // No handshake
       channelHandler.handle(io.vertx.core.Future.succeededFuture(this.channel));
     }
+    // 使用ssl，会在Bootstrap添加的handler(netty)中通知
   }
 
   /**

@@ -58,6 +58,7 @@ public abstract class ConnectionBase {
   protected final ContextInternal context;
   private Handler<Throwable> exceptionHandler;
   private Handler<Void> closeHandler;
+  // 等待写入的请求数
   private int writeInProgress;
   private Object metric;
 
@@ -133,6 +134,7 @@ public abstract class ConnectionBase {
     return handler == null ? voidPromise : wrap(handler);
   }
 
+  // 将handler封装为netty的Promise
   private ChannelPromise wrap(Handler<AsyncResult<Void>> handler) {
     ChannelPromise promise = chctx.newPromise();
     promise.addListener((fut) -> {
@@ -146,8 +148,10 @@ public abstract class ConnectionBase {
     return promise;
   }
 
+  // 发送报文
   public void writeToChannel(Object msg, ChannelPromise promise) {
     synchronized (this) {
+      // 检查是否在EventLoop中执行
       if (!chctx.executor().inEventLoop() || writeInProgress > 0) {
         // Make sure we serialize all the messages as this method can be called from various threads:
         // two "sequential" calls to writeToChannel (we can say that as it is synchronized) should preserve
@@ -158,12 +162,14 @@ public abstract class ConnectionBase {
       }
     }
     // On the event loop thread
+    // 通过netty的ChannelHandlerContext写入
     write(msg, !read, promise);
   }
 
   private void queueForWrite(Object msg, ChannelPromise promise) {
     writeInProgress++;
     chctx.executor().execute(() -> {
+      // 当写入的请求数为0，调用flush
       boolean flush;
       synchronized (this) {
         flush = --writeInProgress == 0 && !read;

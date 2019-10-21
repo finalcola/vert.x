@@ -54,6 +54,7 @@ public class HttpClientRequestImpl extends HttpClientRequestBase implements Http
   static final Logger log = LoggerFactory.getLogger(HttpClientRequestImpl.class);
 
   private final VertxInternal vertx;
+  // 默认false
   private boolean chunked;
   private String hostHeader;
   private String rawMethod;
@@ -64,15 +65,19 @@ public class HttpClientRequestImpl extends HttpClientRequestBase implements Http
   private Handler<Throwable> exceptionHandler;
   private Promise<Void> endPromise = Promise.promise();
   private Future<Void> endFuture = endPromise.future();
+  // 是否请求已完成
   private boolean ended;
   private Throwable reset;
+  // 请求数据的暂存缓冲区
   private ByteBuf pendingChunks;
+  // 每次调用write时传入的handler
   private List<Handler<AsyncResult<Void>>> pendingHandlers;
   private int pendingMaxSize = -1;
   private int followRedirects;
   private VertxHttpHeaders headers;
   private StreamPriority priority;
   public HttpClientStream stream;
+  // 是否连接server
   private boolean connecting;
 
   HttpClientRequestImpl(HttpClientImpl client, boolean ssl, HttpMethod method, SocketAddress server,
@@ -355,6 +360,7 @@ public class HttpClientRequestImpl extends HttpClientRequestBase implements Http
     return this;
   }
 
+  // 通知producer可以继续写入
   void handleDrained() {
     Handler<Void> handler;
     synchronized (this) {
@@ -369,11 +375,15 @@ public class HttpClientRequestImpl extends HttpClientRequestBase implements Http
     }
   }
 
+  // 处理下一个请求
   private void handleNextRequest(HttpClientRequest next, long timeoutMs) {
+    // 复制当前req的属性
     next.setHandler(responsePromise.future().getHandler());
     next.exceptionHandler(exceptionHandler());
+    // help gc
     exceptionHandler(null);
     next.pushHandler(pushHandler);
+    // 重定向限制-1
     next.setMaxRedirects(followRedirects - 1);
     if (next.getHost() == null) {
       next.setHost(hostHeader);
@@ -386,6 +396,7 @@ public class HttpClientRequestImpl extends HttpClientRequestBase implements Http
         if (timeoutMs > 0) {
           next.setTimeout(timeoutMs);
         }
+        // 开启请求
         next.end();
       } else {
         next.reset(0);
@@ -393,14 +404,18 @@ public class HttpClientRequestImpl extends HttpClientRequestBase implements Http
     });
   }
 
+  // 处理重定向
   void handleResponse(HttpClientResponse resp, long timeoutMs) {
     if (reset == null) {
       int statusCode = resp.statusCode();
+      // 重定向
       if (followRedirects > 0 && statusCode >= 300 && statusCode < 400) {
+        // 通知重定向相关的handler处理，重新创建request
         Future<HttpClientRequest> next = client.redirectHandler().apply(resp);
         if (next != null) {
           next.setHandler(ar -> {
             if (ar.succeeded()) {
+              // 发送下次请求
               handleNextRequest(ar.result(), timeoutMs);
             } else {
               responsePromise.fail(ar.cause());
@@ -418,6 +433,7 @@ public class HttpClientRequestImpl extends HttpClientRequestBase implements Http
     return hostHeader != null ? hostHeader : super.hostHeader();
   }
 
+  // 创建连接
   private synchronized void connect(Handler<HttpVersion> headersHandler) {
     if (!connecting) {
 
@@ -426,6 +442,7 @@ public class HttpClientRequestImpl extends HttpClientRequestBase implements Http
       }
 
       SocketAddress peerAddress;
+      // 解析host
       if (hostHeader != null) {
         int idx = hostHeader.lastIndexOf(':');
         if (idx != -1) {
@@ -442,6 +459,7 @@ public class HttpClientRequestImpl extends HttpClientRequestBase implements Http
       }
 
       // Capture some stuff
+      // 融合内外部设置的connectionHandler
       Handler<HttpConnection> h1 = connectionHandler;
       Handler<HttpConnection> h2 = client.connectionHandler();
       Handler<HttpConnection> initializer;
@@ -464,12 +482,18 @@ public class HttpClientRequestImpl extends HttpClientRequestBase implements Http
       // We defer actual connection until the first part of body is written or end is called
       // This gives the user an opportunity to set an exception handler before connecting so
       // they can capture any exceptions on connection
+      // 推迟连接server，直到body第一部分写入或end方法被调用
+      // 这样用户可以在连接前设置exception handler.
       connecting = true;
+      // 通过client建立连接
       client.getConnectionForRequest(connectCtx, peerAddress, ssl, server, ar1 -> {
         if (ar1.succeeded()) {
+          // 创建netty连接和stream成功后的回调
+
           HttpClientStream stream = ar1.result();
           ContextInternal ctx = stream.getContext();
           if (stream.id() == 1 && initializer != null) {
+            // 通知回调
             ctx.executeFromIO(v -> {
               initializer.handle(stream.connection());
             });
@@ -479,6 +503,7 @@ public class HttpClientRequestImpl extends HttpClientRequestBase implements Http
           if (reset != null) {
             stream.reset(reset);
           } else {
+            // 已连接，发送请求
             connected(headersHandler, stream);
           }
         } else {
@@ -488,9 +513,11 @@ public class HttpClientRequestImpl extends HttpClientRequestBase implements Http
     }
   }
 
+  // 连接创建好后，发送请求
   private void connected(Handler<HttpVersion> headersHandler, HttpClientStream stream) {
     synchronized (this) {
       this.stream = stream;
+      // 发送前，校验并设置请求实例
       stream.beginRequest(this);
 
       // If anything was written or the request ended before we got the connection, then
@@ -500,9 +527,11 @@ public class HttpClientRequestImpl extends HttpClientRequestBase implements Http
         stream.doSetWriteQueueMaxSize(pendingMaxSize);
       }
 
+      // 发送暂存的数据
       ByteBuf pending = null;
       Handler<AsyncResult<Void>> handler = null;
       if (pendingChunks != null) {
+        // 回调write方法传入的handler
         List<Handler<AsyncResult<Void>>> handlers = pendingHandlers;
         pendingHandlers = null;
         pending = pendingChunks;
@@ -513,9 +542,11 @@ public class HttpClientRequestImpl extends HttpClientRequestBase implements Http
           };
         }
       }
+      // 写入暂存的数据
       stream.writeHead(method, rawMethod, uri, headers, hostHeader(), chunked, pending, ended, priority, continueHandler, handler);
       if (ended) {
         // we also need to write the head so optimize this and write all out in once
+        // 发送请求结束，更新状态、统计数据
         stream.endRequest();
         tryComplete();
       }
@@ -614,22 +645,28 @@ public class HttpClientRequestImpl extends HttpClientRequestBase implements Http
     write(Buffer.buffer(chunk, enc).getByteBuf(), false, handler);
   }
 
+  // 检查是否需要设置Content-Length
   private boolean requiresContentLength() {
     return !chunked && (headers == null || !headers.contains(CONTENT_LENGTH));
   }
 
+  // 写入buffer并发送
   private void write(ByteBuf buff, boolean end, Handler<AsyncResult<Void>> completionHandler) {
     if (buff == null && !end) {
       return;
     }
     HttpClientStream s;
     synchronized (this) {
+      // 请求已结束
       if (ended) {
         completionHandler.handle(Future.failedFuture(new IllegalStateException("Request already complete")));
         return;
       }
+      // 连接server前需要先设置handler
       checkResponseHandler();
+      // 是否要完成该请求
       if (end) {
+        // 请求头是否需要设置Content-Length
         if (buff != null && requiresContentLength()) {
           headers().set(CONTENT_LENGTH, String.valueOf(buff.readableBytes()));
         }
@@ -640,9 +677,12 @@ public class HttpClientRequestImpl extends HttpClientRequestBase implements Http
       ended |= end;
       if (stream == null) {
         if (buff != null) {
+          // 将写入数据暂存到pendingChunks，如果已存在则合并
           if (pendingChunks == null) {
+            // 暂存请求数据
             pendingChunks = buff;
           } else {
+            // 将pendingChunks转为CompositeByteBuf，继续写入buffer中的内容
             CompositeByteBuf pending;
             if (pendingChunks instanceof CompositeByteBuf) {
               pending = (CompositeByteBuf) pendingChunks;
@@ -651,8 +691,10 @@ public class HttpClientRequestImpl extends HttpClientRequestBase implements Http
               pending.addComponent(true, pendingChunks);
               pendingChunks = pending;
             }
+            // 追加请求data
             pending.addComponent(true, buff);
           }
+          // 每次调用write时传入的handler
           if (completionHandler != null) {
             if (pendingHandlers == null) {
               pendingHandlers = new ArrayList<>();
@@ -660,13 +702,16 @@ public class HttpClientRequestImpl extends HttpClientRequestBase implements Http
             pendingHandlers.add(completionHandler);
           }
         }
+        // 发送请求,会创建stream
         connect(null);
         return;
       }
       s = stream;
     }
+    // 发送报文
     s.writeBuffer(buff, end, completionHandler);
     if (end) {
+      // 更新当前发送数据的stream，回收连接，通知回调
       s.endRequest();
       tryComplete();
     }
@@ -678,6 +723,7 @@ public class HttpClientRequestImpl extends HttpClientRequestBase implements Http
     }
   }
 
+  // 连接server前需要先设置handler
   private void checkResponseHandler() {
     if (stream == null && !connecting && responsePromise.future().getHandler() == null) {
       throw new IllegalStateException("You must set a response handler before connecting to the server");

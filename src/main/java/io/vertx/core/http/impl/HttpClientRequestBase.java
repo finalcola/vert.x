@@ -37,6 +37,7 @@ public abstract class HttpClientRequestBase implements HttpClientRequest {
   private long currentTimeoutTimerId = -1;
   private long currentTimeoutMs;
   private long lastDataReceived;
+  // 处理响应的回调
   protected final Promise<HttpClientResponse> responsePromise;
 
   HttpClientRequestBase(HttpClientImpl client, boolean ssl, HttpMethod method, SocketAddress server, String host, int port, String uri) {
@@ -88,8 +89,11 @@ public abstract class HttpClientRequestBase implements HttpClientRequest {
 
   @Override
   public synchronized HttpClientRequest setTimeout(long timeoutMs) {
+    // 取消已添加的超时任务，并重置状态
     cancelTimeout();
+    // 设置超时时间
     currentTimeoutMs = timeoutMs;
+    // 设置超时任务
     currentTimeoutTimerId = client.getVertx().setTimer(timeoutMs, id -> handleTimeout(timeoutMs));
     return this;
   }
@@ -98,12 +102,15 @@ public abstract class HttpClientRequestBase implements HttpClientRequest {
     cancelTimeout();
   }
 
+  // 取消超时任务，并开始处理响应
   void handleResponse(HttpClientResponse resp) {
     long timeoutMS;
     synchronized (this) {
+      // 取消已添加的超时任务，并重置状态
       timeoutMS = cancelTimeout();
     }
     try {
+      // 处理重定向
       handleResponse(resp, timeoutMS);
     } catch (Throwable t) {
       handleException(t);
@@ -112,6 +119,7 @@ public abstract class HttpClientRequestBase implements HttpClientRequest {
 
   abstract void handleResponse(HttpClientResponse resp, long timeoutMs);
 
+  // 取消已添加的超时任务，并重置状态
   private synchronized long cancelTimeout() {
     long ret;
     if ((ret = currentTimeoutTimerId) != -1) {
@@ -123,11 +131,13 @@ public abstract class HttpClientRequestBase implements HttpClientRequest {
     return ret;
   }
 
+  // 处理请求超时异常
   private void handleTimeout(long timeoutMs) {
     synchronized (this) {
       if (lastDataReceived > 0) {
         long now = System.currentTimeMillis();
         long timeSinceLastData = now - lastDataReceived;
+        // 未超时，重新调度
         if (timeSinceLastData < timeoutMs) {
           // reschedule
           lastDataReceived = 0;
@@ -136,6 +146,7 @@ public abstract class HttpClientRequestBase implements HttpClientRequest {
         }
       }
     }
+    // 处理超时异常
     String msg = "The timeout period of " + timeoutMs + "ms has been exceeded while executing " + method + " " + uri + " for server " + server;
     reset(new NoStackTraceTimeoutException(msg));
   }

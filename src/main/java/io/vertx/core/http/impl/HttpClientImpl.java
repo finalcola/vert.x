@@ -97,8 +97,10 @@ public class HttpClientImpl implements HttpClient, MetricsProvider {
   private final VertxInternal vertx;
   private final HttpClientOptions options;
   private final ContextInternal creatingContext;
+  // 管理连接组件
   private final ConnectionManager websocketCM; // The queue manager for websockets
   private final ConnectionManager httpCM; // The queue manager for requests
+  // 关闭时调用close方法
   private final Closeable closeHook;
   private final ProxyType proxyType;
   private final SSLHelper sslHelper;
@@ -113,6 +115,7 @@ public class HttpClientImpl implements HttpClient, MetricsProvider {
     this.vertx = vertx;
     this.metrics = vertx.metricsSPI() != null ? vertx.metricsSPI().createHttpClientMetrics(options) : null;
     this.options = new HttpClientOptions(options);
+    // 使用的HTTP版本
     List<HttpVersion> alpnVersions = options.getAlpnVersions();
     if (alpnVersions == null || alpnVersions.isEmpty()) {
       switch (options.getProtocolVersion()) {
@@ -124,8 +127,10 @@ public class HttpClientImpl implements HttpClient, MetricsProvider {
           break;
       }
     }
+    // http配置
     this.keepAlive = options.isKeepAlive();
     this.pipelining = options.isPipelining();
+    // https
     this.sslHelper = new SSLHelper(options, options.getKeyCertOptions(), options.getTrustOptions()).
         setApplicationProtocols(alpnVersions);
     sslHelper.validate(vertx);
@@ -140,6 +145,7 @@ public class HttpClientImpl implements HttpClient, MetricsProvider {
       }
       creatingContext.addCloseHook(closeHook);
     }
+    // http的pipeline需要配合keep-alive
     if (!keepAlive && pipelining) {
       throw new IllegalStateException("Cannot have pipelining with no keep alive");
     }
@@ -147,7 +153,9 @@ public class HttpClientImpl implements HttpClient, MetricsProvider {
     websocketCM = new ConnectionManager(this, metrics, HttpVersion.HTTP_1_1, maxWeight, options.getMaxWaitQueueSize());
 
     httpCM = new ConnectionManager(this, metrics, options.getProtocolVersion(), maxWeight, options.getMaxWaitQueueSize());
+    // 默认null
     proxyType = options.getProxyOptions() != null ? options.getProxyOptions().getType() : null;
+    // start方法会开启清理过期连接的任务
     httpCM.start();
     websocketCM.start();
   }
@@ -790,8 +798,11 @@ public class HttpClientImpl implements HttpClient, MetricsProvider {
                                boolean ssl,
                                SocketAddress server,
                                Handler<AsyncResult<HttpClientStream>> handler) {
+    // 创建连接
     httpCM.getConnection(ctx, peerAddress, ssl, server, ar -> {
+      // 通知回调
       if (ar.succeeded()) {
+        // 创建Stream
         ar.result().createStream(ctx, handler);
       } else {
         ctx.dispatch(Future.failedFuture(ar.cause()), handler);
@@ -834,12 +845,15 @@ public class HttpClientImpl implements HttpClient, MetricsProvider {
     Objects.requireNonNull(host, "no null host accepted");
     Objects.requireNonNull(relativeURI, "no null relativeURI accepted");
     boolean useAlpn = options.isUseAlpn();
+    // 默认false
     boolean useSSL = ssl != null ? ssl : options.isSsl();
     if (!useAlpn && useSSL && options.getProtocolVersion() == HttpVersion.HTTP_2) {
       throw new IllegalArgumentException("Must enable ALPN when using H2");
     }
+    // 检查是否已关闭
     checkClosed();
     HttpClientRequest req;
+    // 是否使用代理，默认false
     boolean useProxy = !useSSL && proxyType == ProxyType.HTTP;
     if (useProxy) {
       int defaultPort = protocol.equals("ftp") ? 21 : 80;
@@ -859,6 +873,7 @@ public class HttpClientImpl implements HttpClient, MetricsProvider {
       if (server == null) {
         server = SocketAddress.inetSocketAddress(port, host);
       }
+      // 构建request实例
       req = new HttpClientRequestImpl(this, useSSL, method, server, host, port, relativeURI, vertx);
     }
     if (headers != null) {

@@ -210,6 +210,7 @@ public class HttpClientResponseImpl implements HttpClientResponse  {
     }
   }
 
+  // 读取响应，通知dataHandler
   void handleChunk(Buffer data) {
     request.dataReceived();
     Handler<Buffer> handler;
@@ -225,6 +226,7 @@ public class HttpClientResponseImpl implements HttpClientResponse  {
     }
   }
 
+  // 通知endHandler响应结束
   void handleEnd(MultiMap trailers) {
     Handler<Void> handler;
     synchronized (conn) {
@@ -232,6 +234,7 @@ public class HttpClientResponseImpl implements HttpClientResponse  {
       handler = endHandler;
       endHandler = null;
     }
+    // 通知endHandler
     if (handler != null) {
       try {
         handler.handle(null);

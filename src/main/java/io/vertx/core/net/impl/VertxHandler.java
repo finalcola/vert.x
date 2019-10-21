@@ -75,7 +75,7 @@ public final class VertxHandler<C extends ConnectionBase> extends ChannelDuplexH
 
   /**
    * Set the connection, this is called when the channel is added to the pipeline.
-   *
+   * 当channel添加到pipeline时调用，设置connection和messageHandler
    * @param connection the connection
    */
   private void setConnection(C connection) {
@@ -99,6 +99,7 @@ public final class VertxHandler<C extends ConnectionBase> extends ChannelDuplexH
 
   @Override
   public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
+    // 创建封装的Connection，并将con::handleMessage设置为messageHandler
     setConnection(connectionFactory.apply(ctx));
   }
 
@@ -130,6 +131,7 @@ public final class VertxHandler<C extends ConnectionBase> extends ChannelDuplexH
 
   @Override
   public void channelWritabilityChanged(ChannelHandlerContext ctx) throws Exception {
+    // 通知写事件变化
     C conn = getConnection();
     context.schedule(v -> conn.handleInterestedOpsChanged());
   }
@@ -170,6 +172,7 @@ public final class VertxHandler<C extends ConnectionBase> extends ChannelDuplexH
   @Override
   public void channelRead(ChannelHandlerContext chctx, Object msg) throws Exception {
     conn.setRead();
+    // 读取消息
     context.schedule(msg, messageHandler);
   }
 

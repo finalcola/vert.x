@@ -525,6 +525,7 @@ public class VertxImpl implements VertxInternal, MetricsProvider {
       throw new IllegalArgumentException("Cannot schedule a timer with delay < 1 ms");
     }
     long timerId = timeoutCounter.getAndIncrement();
+    // 创建任务，并在context中调度
     InternalTimerHandler task = new InternalTimerHandler(timerId, handler, periodic, delay, context);
     timeouts.put(timerId, task);
     context.addCloseHook(task);
@@ -963,6 +964,7 @@ public class VertxImpl implements VertxInternal, MetricsProvider {
 
     public void handle(Void v) {
       if (periodic) {
+        // 周期执行，不会从timeouts中移除
         if (timeouts.containsKey(timerID)) {
           handler.handle(timerID);
         }

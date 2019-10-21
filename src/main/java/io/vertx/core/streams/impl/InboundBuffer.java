@@ -20,6 +20,7 @@ import java.util.ArrayDeque;
 
 /**
  * A buffer that transfers elements to an handler with back-pressure.
+ * 传输数据到handler的缓冲区，且支持背压
  * <p/>
  * The buffer is softly bounded, i.e the producer can {@link #write} any number of elements and shall
  * cooperate with the buffer to not overload it.
@@ -27,10 +28,12 @@ import java.util.ArrayDeque;
  * <h3>Writing to the buffer</h3>
  * When the producer writes an element to the buffer, the boolean value returned by the {@link #write} method indicates
  * whether it can continue safely adding more elements or stop.
+ * 当调用write方法写入时，返回的boolean类型表示是否可以继续写入
  * <p/>
  * The producer can set a {@link #drainHandler} to be signaled when it can resume writing again. When a {@code write}
  * returns {@code false}, the drain handler will be called when the buffer becomes writable again. Note that subsequent
  * call to {@code write} will not prevent the drain handler to be called.
+ * producer可以设置drainHandler，当可以再次写入时得到通知
  *
  * <h3>Reading from the buffer</h3>
  * The consumer should set an {@link #handler} to consume elements.
@@ -50,10 +53,11 @@ import java.util.ArrayDeque;
  * </ul>
  *
  * <h3>Concurrency</h3>
- *
+ * 为避免数据竞争，write方法必须在context线程中调用，否则会抛出IllegalStateException
  * To avoid data races, write methods must be called from the context thread associated with the buffer, when that's
  * not the case, an {@code IllegalStateException} is thrown.
  * <p/>
+ * 其他方法可以被任意线程调用
  * Other methods can be called from any thread.
  * <p/>
  * The handlers will always be called from a context thread.
@@ -73,12 +77,18 @@ public class InboundBuffer<E> {
   private final ContextInternal context;
   private final ArrayDeque<E> pending;
   private final long highWaterMark;
+  // 记录consumer的需求数，无限制为MAX
   private long demand;
+  // 通知consumer消费
   private Handler<E> handler;
+  // 是否溢出
   private boolean overflow;
+  // 用于通知producer可以继续写入
   private Handler<Void> drainHandler;
+  // 当缓冲区为空时调用
   private Handler<Void> emptyHandler;
   private Handler<Throwable> exceptionHandler;
+  // 是否发射数据
   private boolean emitting;
 
   public InboundBuffer(Context context) {
@@ -113,13 +123,16 @@ public class InboundBuffer<E> {
    * @return {@code false} when the producer should stop writing
    */
   public boolean write(E element) {
+    // 检查是否在context线程中调用
     checkThread();
     Handler<E> handler;
     synchronized (this) {
       if (demand == 0L || emitting) {
+        // 添加到缓冲区
         pending.add(element);
         return checkWritable();
       } else {
+        // 可以直接传输给handler
         if (demand != Long.MAX_VALUE) {
           --demand;
         }
@@ -127,14 +140,17 @@ public class InboundBuffer<E> {
         handler = this.handler;
       }
     }
+    // 调用handler
     handleEvent(handler, element);
     return emitPending();
   }
 
+  // 检查是否可以继续写入
   private boolean checkWritable() {
     if (demand == Long.MAX_VALUE) {
       return true;
     } else {
+      // 检查pending数量是否高于水印
       long actual = pending.size() - demand;
       boolean writable = actual < highWaterMark;
       overflow |= !writable;
@@ -161,9 +177,11 @@ public class InboundBuffer<E> {
         emitting = true;
       }
     }
+    // 发射pending中的数据给handler，直到demand为0
     return emitPending();
   }
 
+  // 发射pending中的数据给handler，直到demand为0
   private boolean emitPending() {
     E element;
     Handler<E> h;
@@ -171,14 +189,18 @@ public class InboundBuffer<E> {
       synchronized (this) {
         int size = pending.size();
         if (demand == 0L) {
+          // 需求数为0，停止传输数据
           emitting = false;
+          // 检查缓存总数和水印
           boolean writable = size < highWaterMark;
           overflow |= !writable;
           return writable;
         } else if (size == 0) {
+          // 缓存为空，可以继续写入
           emitting = false;
           return true;
         }
+        // 一直发送，直到demand为0
         if (demand != Long.MAX_VALUE) {
           demand--;
         }
@@ -195,6 +217,7 @@ public class InboundBuffer<E> {
    * Calling this assumes {@code (demand > 0L && !pending.isEmpty()) == true}
    */
   private void drain() {
+    // 记录发送的个数
     int emitted = 0;
     Handler<Void> drainHandler;
     Handler<Void> emptyHandler;
@@ -204,6 +227,7 @@ public class InboundBuffer<E> {
       synchronized (this) {
         int size = pending.size();
         if (size == 0) {
+          // 缓冲区发送完成
           emitting = false;
           if (overflow) {
             overflow = false;
@@ -214,18 +238,23 @@ public class InboundBuffer<E> {
           emptyHandler = emitted > 0 ? this.emptyHandler : null;
           break;
         } else if (demand == 0L) {
+          // consumer无法接受更多的数据，停止发送
           emitting = false;
           return;
         }
+        // 发送数+1
         emitted++;
+        // consumer请求数-1
         if (demand != Long.MAX_VALUE) {
           demand--;
         }
+        // 缓冲区取出一个数据，发送给handler
         element = pending.poll();
         handler = this.handler;
       }
       handleEvent(handler, element);
     }
+    // 调用handler，通知可以继续写入
     if (drainHandler != null) {
       handleEvent(drainHandler, null);
     }
@@ -234,6 +263,7 @@ public class InboundBuffer<E> {
     }
   }
 
+  // 将数据传输给handler
   private <T> void handleEvent(Handler<T> handler, T element) {
     if (handler != null) {
       try {
@@ -255,6 +285,7 @@ public class InboundBuffer<E> {
   }
 
   /**
+   * consumer额外请求固定数量的数据(限定发送数量)
    * Request a specific {@code amount} of elements to be fetched, the amount is added to the actual demand.
    * <p/>
    * Pending elements in the buffer will be delivered asynchronously on the context to the handler.
@@ -268,21 +299,25 @@ public class InboundBuffer<E> {
       throw new IllegalArgumentException();
     }
     synchronized (this) {
+      // 添加请求数
       demand += amount;
       if (demand < 0L) {
         demand = Long.MAX_VALUE;
       }
+      // 正在发送 或 缓存为空且未溢出，则不需要继续调用发送接口
       if (emitting || (pending.isEmpty() && !overflow)) {
         return false;
       }
       emitting = true;
     }
+    // 发送数据
     context.runOnContext(v -> drain());
     return true;
   }
 
   /**
    * Read the most recent element synchronously.
+   * 同步方式读取数据
    * <p/>
    * No handler will be called.
    *
@@ -296,6 +331,7 @@ public class InboundBuffer<E> {
 
   /**
    * Clear the buffer synchronously.
+   * 清空缓冲区。且handler不会被调用
    * <p/>
    * No handler will be called.
    *
@@ -308,7 +344,7 @@ public class InboundBuffer<E> {
 
   /**
    * Pause the buffer, it sets the buffer in {@code fetch} mode and clears the actual demand.
-   *
+   * 暂停数据的发送，将demand设置为0
    * @return a reference to this, so the API can be used fluently
    */
   public synchronized InboundBuffer<E> pause() {

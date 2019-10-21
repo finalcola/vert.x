@@ -50,6 +50,7 @@ class HttpChannelConnector implements ConnectionProvider<HttpClientConnection> {
   private final long weight;
   private final long http1Weight;
   private final long http2Weight;
+  // 连接支持的共用数（pipeline功能）
   private final long http1MaxConcurrency;
   private final boolean ssl;
   private final SocketAddress peerAddress;
@@ -77,6 +78,7 @@ class HttpChannelConnector implements ConnectionProvider<HttpClientConnection> {
     this.http1Weight = options.getHttp2MaxPoolSize();
     this.http2Weight = options.getMaxPoolSize();
     this.weight = version == HttpVersion.HTTP_2 ? http2Weight : http1Weight;
+    // 默认不支持pipeline
     this.http1MaxConcurrency = options.isPipelining() ? options.getPipeliningLimit() : 1;
     this.ssl = ssl;
     this.peerAddress = peerAddress;
@@ -92,17 +94,20 @@ class HttpChannelConnector implements ConnectionProvider<HttpClientConnection> {
     conn.close();
   }
 
+  // 创建连接
   @Override
   public void connect(ConnectionListener<HttpClientConnection> listener, ContextInternal context, Handler<AsyncResult<ConnectResult<HttpClientConnection>>> handler) {
     Promise<ConnectResult<HttpClientConnection>> promise = Promise.promise();
     promise.future().setHandler(handler);
     try {
+      // 创建连接
       doConnect(listener, context, promise);
     } catch(Exception e) {
       promise.tryFail(e);
     }
   }
 
+  // 创建连接
   private void doConnect(
     ConnectionListener<HttpClientConnection> listener,
     ContextInternal context,
@@ -111,10 +116,12 @@ class HttpChannelConnector implements ConnectionProvider<HttpClientConnection> {
     boolean domainSocket = server.path() != null;
     boolean useAlpn = options.isUseAlpn();
 
+    // 新建netty客户端
     Bootstrap bootstrap = new Bootstrap();
     bootstrap.group(context.nettyEventLoop());
     bootstrap.channelFactory(client.getVertx().transport().channelFactory(domainSocket));
 
+    // 通过Transport配置bootstrap参数
     applyConnectionOptions(domainSocket, bootstrap);
 
     ProxyOptions options = this.options.getProxyOptions();
@@ -122,8 +129,10 @@ class HttpChannelConnector implements ConnectionProvider<HttpClientConnection> {
       // http proxy requests are handled in HttpClientImpl, everything else can use netty proxy handler
       options = null;
     }
+    // 封装Bootstrap，提供连接
     ChannelProvider channelProvider = new ChannelProvider(bootstrap, sslHelper, context, options);
 
+    // 创建netty channel成功后的回调，为channel的pipeline中添加处理请求的handler
     Handler<AsyncResult<Channel>> channelHandler = res -> {
       if (res.succeeded()) {
         Channel ch = res.result();
@@ -134,12 +143,14 @@ class HttpChannelConnector implements ConnectionProvider<HttpClientConnection> {
               applyHttp2ConnectionOptions(ch.pipeline());
               http2Connected(listener, context, ch, future);
             } else {
+              // netty pipeline添加handler（idle、log、http等）
               applyHttp1xConnectionOptions(ch.pipeline());
               HttpVersion fallbackProtocol = "http/1.0".equals(protocol) ?
                 HttpVersion.HTTP_1_0 : HttpVersion.HTTP_1_1;
               http1xConnected(listener, fallbackProtocol, server, true, context, ch, http1Weight, future);
             }
           } else {
+            // netty pipeline添加handler（idle、log、http等）
             applyHttp1xConnectionOptions(ch.pipeline());
             http1xConnected(listener, version, server, true, context, ch, http1Weight, future);
           }
@@ -147,13 +158,16 @@ class HttpChannelConnector implements ConnectionProvider<HttpClientConnection> {
           ChannelPipeline pipeline = ch.pipeline();
           if (version == HttpVersion.HTTP_2) {
             if (this.options.isHttp2ClearTextUpgrade()) {
+              // pipeline添加默认的Handler
               applyHttp1xConnectionOptions(pipeline);
               http1xConnected(listener, version, server, false, context, ch, http2Weight, future);
             } else {
+              // pipeline添加默认的Handler
               applyHttp2ConnectionOptions(pipeline);
               http2Connected(listener, context, ch, future);
             }
           } else {
+            // pipeline添加默认的Handler
             applyHttp1xConnectionOptions(pipeline);
             http1xConnected(listener, version, server, false, context, ch, http1Weight, future);
           }
@@ -167,6 +181,7 @@ class HttpChannelConnector implements ConnectionProvider<HttpClientConnection> {
     channelProvider.connect(server, peerAddress, this.options.isForceSni() ? peerAddress.host() : null, ssl, channelHandler);
   }
 
+  // 配置bootstrap参数
   private void applyConnectionOptions(boolean domainSocket, Bootstrap bootstrap) {
     client.getVertx().transport().configure(options, domainSocket, bootstrap);
   }
@@ -177,6 +192,7 @@ class HttpChannelConnector implements ConnectionProvider<HttpClientConnection> {
     }
   }
 
+  // pipeline添加默认的Handler
   private void applyHttp1xConnectionOptions(ChannelPipeline pipeline) {
     if (options.getIdleTimeout() > 0) {
       pipeline.addLast("idle", new IdleStateHandler(0, 0, options.getIdleTimeout(), options.getIdleTimeoutUnit()));
@@ -184,6 +200,7 @@ class HttpChannelConnector implements ConnectionProvider<HttpClientConnection> {
     if (options.getLogActivity()) {
       pipeline.addLast("logging", new LoggingHandler());
     }
+    // HTTP解码器
     pipeline.addLast("codec", new HttpClientCodec(
       options.getMaxInitialLineLength(),
       options.getMaxHeaderSize(),
@@ -191,6 +208,7 @@ class HttpChannelConnector implements ConnectionProvider<HttpClientConnection> {
       false,
       false,
       options.getDecoderInitialBufferSize()));
+    // 解压缩handler
     if (options.isTryUseCompression()) {
       pipeline.addLast("inflater", new HttpContentDecompressor(false));
     }
@@ -204,8 +222,11 @@ class HttpChannelConnector implements ConnectionProvider<HttpClientConnection> {
                                Channel ch, long weight,
                                Promise<ConnectResult<HttpClientConnection>> future) {
     boolean upgrade = version == HttpVersion.HTTP_2 && options.isHttp2ClearTextUpgrade();
+    // 创建VertxHandler，该接口实现了netty的ChannelDuplexHandler
     VertxHandler<Http1xClientConnection> clientHandler = VertxHandler.create(context, chctx -> {
+      // 封装connection
       Http1xClientConnection conn = new Http1xClientConnection(listener, upgrade ? HttpVersion.HTTP_1_1 : version, client, endpointMetric, chctx, ssl, server, context, metrics);
+      // 记录统计信息
       if (metrics != null) {
         context.executeFromIO(v -> {
           Object socketMetric = metrics.connected(conn.remoteAddress(), conn.remoteName());

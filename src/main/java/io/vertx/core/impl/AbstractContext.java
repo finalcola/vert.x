@@ -203,7 +203,7 @@ abstract class AbstractContext implements ContextInternal {
     execute(value, task);
   }
 
-  // 检查运行的线程是否是FastThreadLocalThread或work类型的VertxThread
+  // 检查运行的线程是否是eventLoop类型的VertxThread
   private void checkEventLoopThread() {
     Thread current = Thread.currentThread();
     if (!(current instanceof FastThreadLocalThread)) {

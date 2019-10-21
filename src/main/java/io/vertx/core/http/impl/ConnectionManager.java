@@ -38,6 +38,7 @@ class ConnectionManager {
   private final int maxWaitQueueSize;
   private final HttpClientMetrics metrics; // Shall be removed later combining the PoolMetrics with HttpClientMetrics
   private final HttpClientImpl client;
+  // 管理连接
   private final Map<Channel, HttpClientConnection> connectionMap = new ConcurrentHashMap<>();
   private final Map<EndpointKey, Endpoint> endpointMap = new ConcurrentHashMap<>();
   private final HttpVersion version;
@@ -57,11 +58,15 @@ class ConnectionManager {
   }
 
   synchronized void start() {
+    // 默认1s
     long period = client.getOptions().getPoolCleanerPeriod();
+    // 开启后台清理任务
     this.timerID = period > 0 ? client.getVertx().setTimer(period, id -> checkExpired(period)) : -1;
   }
 
+  // 清除过期的client连接
   private synchronized void checkExpired(long period) {
+    //
     endpointMap.values().forEach(e -> e.pool.closeIdle());
     timerID = client.getVertx().setTimer(period, id -> checkExpired(period));
   }
@@ -116,7 +121,9 @@ class ConnectionManager {
     EndpointKey key = new EndpointKey(ssl, server, peerAddress);
     while (true) {
       Endpoint endpoint = endpointMap.computeIfAbsent(key, targetAddress -> {
+        // 连接池大小限制
         int maxPoolSize = Math.max(client.getOptions().getMaxPoolSize(), client.getOptions().getHttp2MaxPoolSize());
+        // 解析地址、端口
         String host;
         int port;
         if (server.path() == null) {
@@ -127,17 +134,22 @@ class ConnectionManager {
           port = 0;
         }
         Object metric = metrics != null ? metrics.createEndpoint(host, port, maxPoolSize) : null;
+
+        // 创建连接组件
         HttpChannelConnector connector = new HttpChannelConnector(client, metric, version, ssl, peerAddress, server);
+        // 连接池
         Pool<HttpClientConnection> pool = new Pool<>(ctx, connector, CLOCK, maxWaitQueueSize, connector.weight(), maxSize,
           v -> {
+            // pool关闭时回调，从endpointMap中移除
             if (metrics != null) {
               metrics.closeEndpoint(host, port, metric);
             }
             endpointMap.remove(key);
-          },
-          conn -> connectionMap.put(conn.channel(), conn),
-          conn -> connectionMap.remove(conn.channel(), conn),
+          }/*poolClosed*/,
+          conn -> connectionMap.put(conn.channel(), conn)/*connectionAdded*/,
+          conn -> connectionMap.remove(conn.channel(), conn)/*connectionRemoved*/,
           false);
+        // 使用Endpoint封装连接池
         return new Endpoint(pool, metric);
       });
       Object metric;
@@ -147,7 +159,9 @@ class ConnectionManager {
         metric = null;
       }
 
+      // 获取连接并通知回调
       if (endpoint.pool.getConnection(ar -> {
+        // 获取连接成功后的回调
         if (metrics != null) {
           metrics.dequeueRequest(endpoint.metric, metric);
         }

@@ -94,9 +94,12 @@ public class Pool<C> {
 
     boolean removed;          // Removed
     C connection;             // The connection instance
+    // 可从连接池获取该连接的最大次数
     long concurrency;         // How many times we can borrow from the connection
+    // 连接当前可被获取的次数
     long capacity;            // How many times the connection is currently borrowed (0 <= capacity <= concurrency)
     long weight;              // The weight that participates in the pool weight
+    // 过期时间，当concurrency == capacity有效
     long expirationTimestamp; // The expiration timestamp when (concurrency == capacity) otherwise -1L
 
     private void init(long concurrency, C conn, long weight) {
@@ -123,7 +126,8 @@ public class Pool<C> {
     }
 
     void connect() {
-      connector.connect(this, context, ar -> {
+      // 通过connector创建连接
+      connector.connect(this/*通知holder回收连接*/, context, ar -> {
         if (ar.succeeded()) {
           connectSucceeded(this, ar.result());
         } else {
@@ -144,18 +148,25 @@ public class Pool<C> {
   private final Consumer<C> connectionRemoved;
   private final LongSupplier clock;
 
+  // waiter队列容量阈值
   private final int queueMaxSize;                                   // the queue max size (does not include inflight waiters)
   private final Deque<Waiter<C>> waitersQueue = new ArrayDeque<>(); // The waiters pending
 
+  // 可用连接
   private final Deque<Holder> available;                            // Available connections, i.e having capacity > 0
   private final boolean fifo;                                       // Recycling policy
+  // 可用连接数量
   private long capacity;                                            // The total available connection capacity
+  // 正在创建的连接数量
   private long connecting;                                          // The number of connections in progress
 
   private final long initialWeight;                                 // The initial weight of a connection
+  // 最大连接数
   private final long maxWeight;                                     // The max weight (equivalent to max pool size)
+  // 权重，等于连接数
   private long weight;                                              // The actual pool weight (equivalent to connection count)
 
+  // 标志是否正在检查，避免重复
   private boolean checkInProgress;                                  // A flag to avoid running un-necessary checks
   private boolean closed;
   private final Handler<Void> poolClosed;
@@ -205,8 +216,10 @@ public class Pool<C> {
     if (closed) {
       return false;
     }
+    // 添加到等待队列
     Waiter<C> waiter = new Waiter<>(handler);
     waitersQueue.add(waiter);
+    // 检查连接,并进行分配
     checkProgress();
     return true;
   }
@@ -226,14 +239,17 @@ public class Pool<C> {
   private void checkProgress() {
     if (!checkInProgress && (canProgress() || canClose())) {
       checkInProgress = true;
+      // 处理等待队列中的任务
       context.nettyEventLoop().execute(this::checkPendingTasks);
     }
   }
 
   private boolean canProgress() {
     if (waitersQueue.size() > 0) {
-      return (canAcquireConnection() || needToCreateConnection() || canEvictWaiter());
+      return (canAcquireConnection()/*存在可用连接*/ || needToCreateConnection()/*需要创建新连接*/
+        || canEvictWaiter()/*可以删除等待队列中的waiter*/);
     } else {
+      // 存在可用连接
       return capacity > 0L;
     }
   }
@@ -244,6 +260,7 @@ public class Pool<C> {
   private void checkPendingTasks() {
     while (true) {
       Runnable task;
+      // 执行task
       synchronized (this) {
         task = nextTask();
         if (task == null) {
@@ -265,37 +282,46 @@ public class Pool<C> {
   }
 
   /**
+   * 需要创建新连接
    * @return {@code true} if a connection needs to be created
    */
   private boolean needToCreateConnection() {
+    // 未达到最大连接数且在建连接数量小于waiter数量
     return weight < maxWeight && (waitersQueue.size() - connecting) > 0;
   }
 
   /**
+   * 可以删除已存在的waiter
    * @return {@code true} if a waiter can be evicted from the queue
    */
   private boolean canEvictWaiter() {
+    // 等待中的waiter数量大于queueMaxSize
     return queueMaxSize >= 0 && (waitersQueue.size() - connecting) > queueMaxSize;
   }
 
   private Runnable nextTask() {
     if (waitersQueue.size() > 0) {
       // Acquire a task that will deliver a connection
+      // 连接池是否存在可用连接
       if (canAcquireConnection()) {
+        // 从连接池获取一个连接
         Holder conn = available.peek();
         capacity--;
         if (--conn.capacity == 0) {
           conn.expirationTimestamp = -1L;
           available.poll();
         }
+        // 分配给waiter
         Waiter<C> waiter = waitersQueue.poll();
         return () -> waiter.handler.handle(Future.succeededFuture(conn.connection));
       } else if (needToCreateConnection()) {
+        // 新建连接
         connecting++;
         weight += initialWeight;
-        Holder holder  = new Holder();
+        Holder holder = new Holder();
         return holder::connect;
       } else if (canEvictWaiter()) {
+        // 移除waiter，分配失败
         Waiter<C> waiter = waitersQueue.removeLast();
         return () -> waiter.handler.handle(Future.failedFuture(new ConnectionPoolTooBusyException("Connection pool reached max wait queue size of " + queueMaxSize)));
       }
@@ -304,6 +330,7 @@ public class Pool<C> {
       List<Holder> expired = null;
       for (Iterator<Holder> it  = available.iterator();it.hasNext();) {
         Holder holder = it.next();
+        // 删除过期连接
         if (holder.capacity == holder.concurrency && (holder.expirationTimestamp == 0 || now >= holder.expirationTimestamp)) {
           it.remove();
           if (holder.capacity > 0) {
@@ -317,6 +344,7 @@ public class Pool<C> {
           expired.add(holder);
         }
       }
+      // 关闭连接
       if (expired != null) {
         List<Holder> toClose = expired;
         return () -> {
@@ -329,6 +357,7 @@ public class Pool<C> {
     return null;
   }
 
+  // 连接池为空，且等待队列为空
   private boolean canClose() {
     return weight == 0 && waitersQueue.isEmpty();
   }
@@ -343,25 +372,32 @@ public class Pool<C> {
 
   /**
    * Handle connect success, a number of waiters will be satisfied according to the connection's concurrency.
+   * 处理创建连接成功
    */
   private void connectSucceeded(Holder holder, ConnectResult<C> result) {
     List<Waiter<C>> waiters;
     synchronized (this) {
+      // 更新状态
       connecting--;
       weight += initialWeight - result.weight();
+      // 将连接用holder封装，并设置holder的属性
       holder.init(result.concurrency(), result.connection(), result.weight());
       waiters = new ArrayList<>();
+      // 分配给capacity个waiter
       while (holder.capacity > 0 && waitersQueue.size() > 0) {
         waiters.add(waitersQueue.poll());
         holder.capacity--;
       }
+      // 添加到可用连接，holder.capacity添加到pool.capacity
       if (holder.capacity > 0) {
         available.add(holder);
         capacity += holder.capacity;
       }
       checkProgress();
     }
+    // 新连接添加时的回调
     connectionAdded.accept(holder.connection);
+    // 分配给waiter
     for (Waiter<C> waiter : waiters) {
       waiter.handler.handle(Future.succeededFuture(holder.connection));
     }
@@ -406,6 +442,7 @@ public class Pool<C> {
     }
   }
 
+  // 回收连接
   private void recycle(Holder holder, long timestamp) {
     if (timestamp < 0L) {
       throw new IllegalArgumentException("Invalid timestamp");
@@ -422,6 +459,7 @@ public class Pool<C> {
       }
     }
     if (toClose != null) {
+      // 关闭连接
       connector.close(holder.connection);
     } else {
       synchronized (this) {
@@ -454,16 +492,21 @@ public class Pool<C> {
   /**
    * Recycles a connection.
    *
-   * @param holder the connection to recycle
+   * @param holder    the connection to recycle
    * @param timestamp the expiration timestamp of the connection
    * @return {@code true} if the connection shall be closed
    */
   private boolean recycleConnection(Holder holder, long timestamp) {
+    // 连接被获取次数+1
     long newCapacity = holder.capacity + 1;
+    // 连接获取次数已经大于限制，error
     if (newCapacity > holder.concurrency) {
       throw new AssertionError("Attempt to recycle a connection more than permitted");
     }
     if (timestamp == 0L && newCapacity == holder.concurrency && capacity >= waitersQueue.size()) {
+      // 获取次数已经达到限制
+
+      // 移除该连接
       if (holder.capacity > 0) {
         capacity -= holder.capacity;
         available.remove(holder);
@@ -472,7 +515,10 @@ public class Pool<C> {
       holder.capacity = 0;
       return true;
     } else {
+      // 回收连接
+      // 可以连接数+1
       capacity++;
+      // 添加到可用连接
       if (holder.capacity == 0) {
         if (fifo) {
           available.addLast(holder);

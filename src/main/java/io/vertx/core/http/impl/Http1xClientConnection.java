@@ -194,13 +194,17 @@ class Http1xClientConnection extends Http1xConnectionBase<WebSocketImpl> impleme
     private final Http1xClientConnection conn;
     private final ContextInternal context;
     private final Promise<HttpClientStream> promise;
+    // 缓冲区
     private final InboundBuffer<Object> queue;
+    // 请求实例
     private HttpClientRequestImpl request;
     private Handler<Void> continueHandler;
     private HttpClientResponseImpl response;
+    // 请求是否结束
     private boolean requestEnded;
     private boolean responseEnded;
     private boolean reset;
+    // 多个StreamImpl使用链表的形式进行拼接
     private StreamImpl next;
     private Object trace;
     private long bytesWritten;
@@ -217,6 +221,7 @@ class Http1xClientConnection extends Http1xConnectionBase<WebSocketImpl> impleme
       promise.future().setHandler(handler);
     }
 
+    // 添加stream到尾部
     private void append(StreamImpl s) {
       StreamImpl c = this;
       while (c.next != null) {
@@ -252,12 +257,15 @@ class Http1xClientConnection extends Http1xConnectionBase<WebSocketImpl> impleme
 
     @Override
     public void writeHead(HttpMethod method, String rawMethod, String uri, MultiMap headers, String hostHeader, boolean chunked, ByteBuf buf, boolean end, StreamPriority priority, Handler<Void> contHandler, Handler<AsyncResult<Void>> handler) {
+      // 创建req(netty)
       HttpRequest request = createRequest(method, rawMethod, uri, headers);
+      // 根据配置，设置请求头
       prepareRequestHeaders(request, hostHeader, chunked);
       if (buf != null) {
         bytesWritten += buf.readableBytes();
       }
       continueHandler = contHandler;
+      // 发送请求
       sendRequest(request, buf, end, handler);
       if (conn.responseInProgress == null) {
         conn.responseInProgress = this;
@@ -267,6 +275,7 @@ class Http1xClientConnection extends Http1xConnectionBase<WebSocketImpl> impleme
       next = null;
     }
 
+    // 创建req(netty)
     private HttpRequest createRequest(HttpMethod method, String rawMethod, String uri, MultiMap headers) {
       DefaultHttpRequest request = new DefaultHttpRequest(HttpUtils.toNettyHttpVersion(conn.version), HttpUtils.toNettyHttpMethod(method, rawMethod), uri, false);
       if (headers != null) {
@@ -278,6 +287,7 @@ class Http1xClientConnection extends Http1xConnectionBase<WebSocketImpl> impleme
       return request;
     }
 
+    // 根据配置，设置请求头
     private void prepareRequestHeaders(HttpRequest request, String hostHeader, boolean chunked) {
       HttpHeaders headers = request.headers();
       headers.remove(TRANSFER_ENCODING);
@@ -298,8 +308,10 @@ class Http1xClientConnection extends Http1xConnectionBase<WebSocketImpl> impleme
       }
     }
 
+    // 发送请求
     private void sendRequest(
       HttpRequest request, ByteBuf buf, boolean end, Handler<AsyncResult<Void>> handler) {
+      // 拼装请求体
       if (end) {
         if (buf != null) {
           request = new AssembledFullHttpRequest(request, buf);
@@ -311,9 +323,11 @@ class Http1xClientConnection extends Http1xConnectionBase<WebSocketImpl> impleme
           request = new AssembledHttpRequest(request, buf);
         }
       }
+      // 发送请求
       conn.writeToChannel(request, conn.toPromise(handler));
     }
 
+    // 写入缓冲区
     private boolean handleChunk(Buffer buff) {
       bytesRead += buff.length();
       return queue.write(buff);
@@ -324,6 +338,7 @@ class Http1xClientConnection extends Http1xConnectionBase<WebSocketImpl> impleme
       if (buff == null && !end) {
         return;
       }
+      // 将buffer封装为http报文
       HttpContent msg;
       if (end) {
         if (buff != null && buff.isReadable()) {
@@ -335,6 +350,7 @@ class Http1xClientConnection extends Http1xConnectionBase<WebSocketImpl> impleme
         msg = new DefaultHttpContent(buff);
       }
       bytesWritten += msg.content().readableBytes();
+      // 发送报文
       conn.writeToChannel(msg, conn.toPromise(handler));
     }
 
@@ -388,19 +404,23 @@ class Http1xClientConnection extends Http1xConnectionBase<WebSocketImpl> impleme
       }
     }
 
+    // 设置请求实例
     @Override
     public void beginRequest(HttpClientRequestImpl req) {
       synchronized (conn) {
+        // 校验是否重复
         if (request != null) {
           throw new IllegalStateException("Already writing a request");
         }
         if (conn.requestInProgress != this) {
           throw new IllegalStateException("Connection is already writing another request");
         }
+        // 设置request
         request = req;
         if (conn.metrics != null) {
           metric = conn.metrics.requestBegin(conn.endpointMetric, conn.metric(), conn.localAddress(), conn.remoteAddress(), request);
         }
+        // 统计
         VertxTracer tracer = context.tracer();
         if (tracer != null) {
           List<Map.Entry<String, String>> tags = new ArrayList<>();
@@ -412,6 +432,7 @@ class Http1xClientConnection extends Http1xConnectionBase<WebSocketImpl> impleme
       }
     }
 
+    // 发送请求结束，更新状态、统计数据
     public void endRequest() {
       boolean doRecycle;
       synchronized (conn) {
@@ -422,13 +443,17 @@ class Http1xClientConnection extends Http1xConnectionBase<WebSocketImpl> impleme
         if (requestEnded) {
           throw new IllegalStateException("Request already sent");
         }
+        // 标记请求结束
         requestEnded = true;
+        // 统计
         if (conn.metrics != null) {
           conn.metrics.requestEnd(metric);
         }
         doRecycle = responseEnded;
       }
+      // 统计写入的数据大小
       conn.reportBytesWritten(bytesWritten);
+      // 更新当前发送数据的stream，回收连接，通知回调
       conn.handleRequestEnd(doRecycle);
     }
 
@@ -451,6 +476,7 @@ class Http1xClientConnection extends Http1xConnectionBase<WebSocketImpl> impleme
     public void updatePriority(StreamPriority streamPriority) {
     }
 
+    // 开始接收响应，创建response封装类
     private HttpClientResponseImpl beginResponse(HttpResponse resp) {
       HttpVersion version;
       if (resp.protocolVersion() == io.netty.handler.codec.http.HttpVersion.HTTP_1_0) {
@@ -458,15 +484,18 @@ class Http1xClientConnection extends Http1xConnectionBase<WebSocketImpl> impleme
       } else {
         version = io.vertx.core.http.HttpVersion.HTTP_1_1;
       }
+      // 封装响应
       response = new HttpClientResponseImpl(request, version, this, resp.status().code(), resp.status().reasonPhrase(), new HeadersAdaptor(resp.headers()));
       if (conn.metrics != null) {
         conn.metrics.responseBegin(metric, response);
       }
+      // 处理CONNECTION:CLOSE和KEEP_ALIVE请求头
       if (resp.status().code() != 100 && request.method() != io.vertx.core.http.HttpMethod.CONNECT) {
         // See https://tools.ietf.org/html/rfc7230#section-6.3
         String responseConnectionHeader = resp.headers().get(HttpHeaderNames.CONNECTION);
         io.netty.handler.codec.http.HttpVersion protocolVersion = resp.protocolVersion();
         String requestConnectionHeader = request.headers().get(HttpHeaderNames.CONNECTION);
+        // 是否close连接
         // We don't need to protect against concurrent changes on forceClose as it only goes from false -> true
         if (HttpHeaderValues.CLOSE.contentEqualsIgnoreCase(responseConnectionHeader) || HttpHeaderValues.CLOSE.contentEqualsIgnoreCase(requestConnectionHeader)) {
           // In all cases, if we have a close connection option then we SHOULD NOT treat the connection as persistent
@@ -476,6 +505,7 @@ class Http1xClientConnection extends Http1xConnectionBase<WebSocketImpl> impleme
           // currently Vertx forces the Connection header if keepalive is enabled for 1.0
           conn.close = true;
         }
+        // 解析KEEP_ALIVE
         String keepAliveHeader = resp.headers().get(HttpHeaderNames.KEEP_ALIVE);
         if (keepAliveHeader != null) {
           int timeout = HttpUtils.parseKeepAliveHeaderTimeout(keepAliveHeader);
@@ -484,14 +514,17 @@ class Http1xClientConnection extends Http1xConnectionBase<WebSocketImpl> impleme
           }
         }
       }
+      // 当响应读取到缓冲区时，调用response
       queue.handler(item -> {
         if (item instanceof MultiMap) {
+          // 记录读取的字节数
           conn.reportBytesRead(bytesRead);
           response.handleEnd((MultiMap) item);
         } else {
           response.handleChunk((Buffer) item);
         }
       });
+      // 背压相关，当缓冲区读取完成后，通知继续读取响应
       queue.drainHandler(v -> {
         if (!responseEnded) {
           conn.doResume();
@@ -500,8 +533,10 @@ class Http1xClientConnection extends Http1xConnectionBase<WebSocketImpl> impleme
       return response;
     }
 
+    // 读取响应完成
     private boolean endResponse(LastHttpContent trailer) {
       synchronized (conn) {
+        // 统计
         if (conn.metrics != null) {
           conn.metrics.responseEnd(metric, response);
         }
@@ -510,9 +545,11 @@ class Http1xClientConnection extends Http1xConnectionBase<WebSocketImpl> impleme
           tracer.receiveResponse(context, response, trace, null, HttpUtils.CLIENT_RESPONSE_TAG_EXTRACTOR);
         }
       }
+      // 写入最后的请求头
       queue.write(new HeadersAdaptor(trailer.trailingHeaders()));
       synchronized (conn) {
         responseEnded = true;
+        // 是否关闭连接
         conn.close |= !conn.options.isKeepAlive();
         conn.doResume();
         return requestEnded;
@@ -551,10 +588,12 @@ class Http1xClientConnection extends Http1xConnectionBase<WebSocketImpl> impleme
     } else if (close) {
       close();
     } else {
+      // 回收连接
       recycle();
     }
   }
 
+  // 验证消息
   private Throwable validateMessage(Object msg) {
     if (msg instanceof HttpObject) {
       HttpObject obj = (HttpObject) msg;
@@ -571,39 +610,49 @@ class Http1xClientConnection extends Http1xConnectionBase<WebSocketImpl> impleme
     return null;
   }
 
+  // 处理读取的消息
   public void handleMessage(Object msg) {
+    // 验证
     Throwable error = validateMessage(msg);
     if (error != null) {
       fail(error);
     } else if (msg instanceof HttpObject) {
+      // HTTP报文
       HttpObject obj = (HttpObject) msg;
       handleHttpMessage(obj);
     } else if (msg instanceof WebSocketFrame) {
+      // WebSocket报文
       handleWsFrame((WebSocketFrame) msg);
     } else {
       throw new IllegalStateException("Invalid object " + msg);
     }
   }
 
+  // 处理读取的http报文
   private void handleHttpMessage(HttpObject obj) {
     if (obj instanceof HttpResponse) {
+      // 开始接收响应，创建响应封装类，取消超时任务，并处理重定向
       handleResponseBegin((HttpResponse) obj);
     } else if (obj instanceof HttpContent) {
+      // 读取报文,写入缓冲区
       HttpContent chunk = (HttpContent) obj;
       if (chunk.content().isReadable()) {
         Buffer buff = Buffer.buffer(VertxHandler.safeBuffer(chunk.content(), chctx.alloc()));
         handleResponseChunk(buff);
       }
+      // 最后一条报文，结束响应读取
       if (chunk instanceof LastHttpContent) {
         handleResponseEnd((LastHttpContent) chunk);
       }
     }
   }
 
+  // 创建响应封装类，取消超时任务，并处理重定向
   private void handleResponseBegin(HttpResponse resp) {
     if (resp.status().code() == 100) {
       Handler<Void> handler;
       ContextInternal ctx;
+      // continueHandler回调
       synchronized (this) {
         StreamImpl stream = responseInProgress;
         handler = stream.continueHandler;
@@ -619,12 +668,15 @@ class Http1xClientConnection extends Http1xConnectionBase<WebSocketImpl> impleme
       synchronized (this) {
         stream = responseInProgress;
         request = stream.request;
+        // 开始接收响应，创建response封装类
         response = stream.beginResponse(resp);
       }
+      // 取消超时任务，并处理重定向
       stream.context.dispatch(v -> request.handleResponse(response));
     }
   }
 
+  // 处理请求体，将请求体写入缓冲区
   private void handleResponseChunk(Buffer buff) {
     StreamImpl resp;
     synchronized (this) {
@@ -656,15 +708,18 @@ class Http1xClientConnection extends Http1xConnectionBase<WebSocketImpl> impleme
     });
   }
 
+  // 更新当前发送数据的stream，回收连接，通知回调
   private void handleRequestEnd(boolean recycle) {
     StreamImpl next;
     synchronized (this) {
       next = requestInProgress.next;
       requestInProgress = next;
     }
+    // 回收连接
     if (recycle) {
       recycle();
     }
+    // 通知下一个请求的handler
     if (next != null) {
       next.promise.complete(next);
     }
@@ -785,6 +840,7 @@ class Http1xClientConnection extends Http1xConnectionBase<WebSocketImpl> impleme
     if (!isNotWritable()) {
       StreamImpl current = requestInProgress;
       if (current != null) {
+        // 通知producer可以继续写入
         current.context.dispatch(v -> current.request.handleDrained());
       } else if (ws != null) {
         ws.handleDrained();
@@ -844,11 +900,13 @@ class Http1xClientConnection extends Http1xConnectionBase<WebSocketImpl> impleme
     }
   }
 
+  // 根据连接创建Stream
   @Override
   public void createStream(ContextInternal context, Handler<AsyncResult<HttpClientStream>> handler) {
     StreamImpl stream;
     synchronized (this) {
       ContextInternal sub = getContext().duplicate(context);
+      // 创建stream用于读写
       stream = new StreamImpl(sub, this, seq++, handler);
       if (requestInProgress != null) {
         requestInProgress.append(stream);
@@ -859,6 +917,7 @@ class Http1xClientConnection extends Http1xConnectionBase<WebSocketImpl> impleme
     stream.context.dispatch(Future.succeededFuture(stream), stream.promise);
   }
 
+  // 回收连接
   private void recycle() {
     long expiration = keepAliveTimeout == 0 ? 0L : System.currentTimeMillis() + keepAliveTimeout * 1000;
     listener.onRecycle(expiration);
