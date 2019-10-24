@@ -60,12 +60,14 @@ public class HttpServerImpl implements HttpServer, Closeable, MetricsProvider {
   final HttpServerOptions options;
   final VertxInternal vertx;
   private final SSLHelper sslHelper;
+  // 创建server的context
   private final ContextInternal creatingContext;
   private final boolean disableH2c = Boolean.getBoolean(DISABLE_H2C_PROP_NAME);
   final Map<Channel, ConnectionBase> connectionMap = new ConcurrentHashMap<>();
   private final VertxEventLoopGroup availableWorkers = new VertxEventLoopGroup();
   private final HandlerManager<HttpHandlers> httpHandlerMgr = new HandlerManager<>(availableWorkers);
   private final HttpStreamHandler<ServerWebSocket> wsStream = new HttpStreamHandler<>();
+  // 封装处理请求handler、获取临界资源的功能
   private final HttpStreamHandler<HttpServerRequest> requestStream = new HttpStreamHandler<>();
   private Handler<HttpConnection> connectionHandler;
 
@@ -83,6 +85,7 @@ public class HttpServerImpl implements HttpServer, Closeable, MetricsProvider {
     this.options = new HttpServerOptions(options);
     this.vertx = vertx;
     this.creatingContext = vertx.getContext();
+    // 销毁server时的hook，调用close方法
     if (creatingContext != null) {
       creatingContext.addCloseHook(this);
     }
@@ -471,6 +474,7 @@ public class HttpServerImpl implements HttpServer, Closeable, MetricsProvider {
   */
   class HttpStreamHandler<C extends ReadStream<Buffer>> implements ReadStream<C> {
 
+    // 处理请求的handler
     private Handler<C> handler;
     private long demand = Long.MAX_VALUE;
     private Handler<Void> endHandler;
@@ -481,6 +485,7 @@ public class HttpServerImpl implements HttpServer, Closeable, MetricsProvider {
       }
     }
 
+    // 临界资源，用于创建socket
     boolean accept() {
       synchronized (HttpServerImpl.this) {
         boolean accept = demand > 0L;
@@ -508,6 +513,7 @@ public class HttpServerImpl implements HttpServer, Closeable, MetricsProvider {
       }
     }
 
+    // 暂定接收连接请求
     @Override
     public ReadStream pause() {
       synchronized (HttpServerImpl.this) {
@@ -527,6 +533,7 @@ public class HttpServerImpl implements HttpServer, Closeable, MetricsProvider {
       return this;
     }
 
+    // 恢复连接
     @Override
     public ReadStream resume() {
       synchronized (HttpServerImpl.this) {
