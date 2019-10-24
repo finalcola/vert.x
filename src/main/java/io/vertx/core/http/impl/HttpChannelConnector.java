@@ -236,6 +236,7 @@ class HttpChannelConnector implements ConnectionProvider<HttpClientConnection> {
       }
       return conn;
     });
+    // 在clientHandler添加到pipeline时的回调
     clientHandler.addHandler(conn -> {
       if (upgrade) {
         future.complete(new ConnectResult<>(new Http2UpgradedClientConnection(client, conn), 1, http2Weight));

@@ -45,9 +45,12 @@ public class HttpClientResponseImpl implements HttpClientResponse  {
   private final HttpConnection conn;
   private final HttpClientStream stream;
 
+  // BodyHandler
   private Handler<Buffer> dataHandler;
   private Handler<HttpFrame> customFrameHandler;
+  // BodyHandler.handleEnd
   private Handler<Void> endHandler;
+  // BodyHandler.handleException
   private Handler<Throwable> exceptionHandler;
   private Handler<StreamPriority> priorityHandler;
   private NetSocket netSocket;
@@ -234,7 +237,7 @@ public class HttpClientResponseImpl implements HttpClientResponse  {
       handler = endHandler;
       endHandler = null;
     }
-    // 通知endHandler
+    // 通知endHandler（用户自定义的handler）
     if (handler != null) {
       try {
         handler.handle(null);
@@ -278,6 +281,7 @@ public class HttpClientResponseImpl implements HttpClientResponse  {
     return this;
   }
 
+  // 创建处理HTTPbody的future,会在response对象中设置对应的handler
   @Override
   public Future<Buffer> body() {
     BodyHandler handler = new BodyHandler();
@@ -287,6 +291,7 @@ public class HttpClientResponseImpl implements HttpClientResponse  {
     return handler.promise.future();
   }
 
+  // 处理http报文的handler，接受http rep时调用
   private static final class BodyHandler implements Handler<Buffer> {
 
     private Promise<Buffer> promise = Promise.promise();
@@ -294,10 +299,12 @@ public class HttpClientResponseImpl implements HttpClientResponse  {
 
     @Override
     public void handle(Buffer event) {
+      // 用于累积报文
       body.appendBuffer(event);
     }
 
     void handleEnd(Void v) {
+      // 在future中设置完整报文的结果
       promise.tryComplete(body);
     }
 

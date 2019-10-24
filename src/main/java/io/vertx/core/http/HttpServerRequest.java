@@ -214,7 +214,9 @@ public interface HttpServerRequest extends ReadStream<Buffer> {
   default HttpServerRequest bodyHandler(@Nullable Handler<Buffer> bodyHandler) {
     if (bodyHandler != null) {
       Buffer body = Buffer.buffer();
+      // 向buffer中追加数据
       handler(body::appendBuffer);
+      // endHandler在全部接受后调用
       endHandler(v -> bodyHandler.handle(body));
     }
     return this;

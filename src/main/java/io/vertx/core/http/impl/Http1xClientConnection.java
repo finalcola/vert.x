@@ -517,6 +517,7 @@ class Http1xClientConnection extends Http1xConnectionBase<WebSocketImpl> impleme
       // 当响应读取到缓冲区时，调用response
       queue.handler(item -> {
         if (item instanceof MultiMap) {
+          // MultiMap即读取最后一条报文的时候
           // 记录读取的字节数
           conn.reportBytesRead(bytesRead);
           response.handleEnd((MultiMap) item);
@@ -545,7 +546,7 @@ class Http1xClientConnection extends Http1xConnectionBase<WebSocketImpl> impleme
           tracer.receiveResponse(context, response, trace, null, HttpUtils.CLIENT_RESPONSE_TAG_EXTRACTOR);
         }
       }
-      // 写入最后的请求头
+      // 写入最后的请求头（MultiMap类型）
       queue.write(new HeadersAdaptor(trailer.trailingHeaders()));
       synchronized (conn) {
         responseEnded = true;

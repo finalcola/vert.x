@@ -100,7 +100,7 @@ public final class VertxHandler<C extends ConnectionBase> extends ChannelDuplexH
   @Override
   public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
     // 创建封装的Connection，并将con::handleMessage设置为messageHandler
-    setConnection(connectionFactory.apply(ctx));
+    setConnection(connectionFactory.apply(ctx)/*构造函数传入的回调，用于创建connection*/);
   }
 
   /**
@@ -172,7 +172,7 @@ public final class VertxHandler<C extends ConnectionBase> extends ChannelDuplexH
   @Override
   public void channelRead(ChannelHandlerContext chctx, Object msg) throws Exception {
     conn.setRead();
-    // 读取消息
+    // 读取消息，messageHandler.handle(msg)
     context.schedule(msg, messageHandler);
   }
 
