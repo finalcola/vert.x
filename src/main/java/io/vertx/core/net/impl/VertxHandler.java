@@ -23,6 +23,7 @@ import io.vertx.core.impl.ContextInternal;
 import java.util.function.Function;
 
 /**
+ * 将channel事件通知给connection类处理
  * @author <a href="mailto:nmaurer@redhat.com">Norman Maurer</a>
  */
 public final class VertxHandler<C extends ConnectionBase> extends ChannelDuplexHandler {
@@ -66,6 +67,7 @@ public final class VertxHandler<C extends ConnectionBase> extends ChannelDuplexH
   private C conn;
   private Handler<C> addHandler;
   private Handler<C> removeHandler;
+  // connection::handleMessage
   private Handler<Object> messageHandler;
 
   private VertxHandler(ContextInternal context, Function<ChannelHandlerContext, C> connectionFactory) {

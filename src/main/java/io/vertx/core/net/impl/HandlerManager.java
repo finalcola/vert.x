@@ -31,6 +31,7 @@ public class HandlerManager<T> {
   private static final Logger log = LoggerFactory.getLogger(HandlerManager.class);
 
   private final VertxEventLoopGroup availableWorkers;
+  // 存放EventLoop和对应的handle集合
   private final ConcurrentMap<EventLoop, Handlers<T>> handlerMap = new ConcurrentHashMap<>();
 
   // We maintain a separate hasHandlers variable so we can implement hasHandlers() efficiently
@@ -57,6 +58,7 @@ public class HandlerManager<T> {
     return handlers == null ? null : handlers.chooseHandler();
   }
 
+  // 添加handler
   public synchronized void addHandler(T handler, ContextInternal context) {
     EventLoop worker = context.nettyEventLoop();
     availableWorkers.addWorker(worker);
@@ -85,6 +87,7 @@ public class HandlerManager<T> {
     availableWorkers.removeWorker(worker);
   }
 
+  // 保存handler集合，并通过轮询的方法获取
   private static final class Handlers<T> {
     private int pos;
     private final List<HandlerHolder<T>> list = new CopyOnWriteArrayList<>();

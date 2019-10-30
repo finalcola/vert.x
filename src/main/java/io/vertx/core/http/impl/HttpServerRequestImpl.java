@@ -118,12 +118,16 @@ public class HttpServerRequestImpl implements HttpServerRequest {
     }
   }
 
+  // get or create
   private InboundBuffer<Object> pendingQueue() {
     if (pending == null) {
+      // 创建读取缓冲区
       pending = new InboundBuffer<>(conn.getContext(), 8);
       pending.drainHandler(v -> conn.doResume());
       pending.handler(buffer -> {
+        // 通知处理缓冲区的数据
         if (buffer == InboundBuffer.END_SENTINEL) {
+          // 读取到标记结束的对象
           onEnd();
         } else {
           onData((Buffer) buffer);
@@ -133,23 +137,29 @@ public class HttpServerRequestImpl implements HttpServerRequest {
     return pending;
   }
 
+  // 读取http主体部分
   void handleContent(Buffer buffer) {
     InboundBuffer<Object> queue;
     synchronized (conn) {
       queue = pending;
     }
     if (queue != null) {
+      // 使用了读缓存区，先写入到缓冲区，由缓冲区通知handler处理（onData）
       // We queue requests if paused or a request is in progress to prevent responses being written in the wrong order
       if (!queue.write(buffer)) {
         // We only pause when we are actively called by the connection
         conn.doPause();
       }
     } else {
+      // 未使用缓冲区，直接处理
+      // 读取请求的主体，添加到body并通知dataHandler
       onData(buffer);
     }
   }
 
+  // 创建response对象，并检查是否需要返回100状态码
   void handleBegin() {
+    // 创建response对象
     response = new HttpServerResponseImpl((VertxInternal) conn.vertx(), context, conn, request, metric);
     if (conn.handle100ContinueAutomatically) {
       check100();
@@ -188,6 +198,7 @@ public class HttpServerRequestImpl implements HttpServerRequest {
 
   private void check100() {
     if (HttpUtil.is100ContinueExpected(request)) {
+      // 返回100 Continue
       conn.write100Continue();
     }
   }
@@ -502,6 +513,7 @@ public class HttpServerRequestImpl implements HttpServerRequest {
 
   @Override
   public synchronized Future<Buffer> body() {
+    // 初始化body数据结构(如果用户未使用body，则不会进行创建，避免无效的写入)
     if (bodyPromise == null) {
       bodyPromise = Promise.promise();
       body = Buffer.buffer();
@@ -509,6 +521,7 @@ public class HttpServerRequestImpl implements HttpServerRequest {
     return bodyPromise.future();
   }
 
+  // 读取请求的主体，添加到body并通知dataHandler
   private void onData(Buffer data) {
     Handler<Buffer> handler;
     synchronized (conn) {
@@ -521,10 +534,12 @@ public class HttpServerRequestImpl implements HttpServerRequest {
         }
       }
       handler = dataHandler;
+      // 写入到body
       if (body != null) {
         body.appendBuffer(data);
       }
     }
+    // 回调dataHandler
     if (handler != null) {
       handler.handle(data);
     }
@@ -539,10 +554,12 @@ public class HttpServerRequestImpl implements HttpServerRequest {
     if (queue != null) {
       queue.write(InboundBuffer.END_SENTINEL);
     } else {
+      // 通知body回调、endHandler等
       onEnd();
     }
   }
 
+  // 请求接收完成，进行处理body
   private void onEnd() {
     Handler<Void> handler;
     Promise<Buffer> bodyPromise;
@@ -559,6 +576,7 @@ public class HttpServerRequestImpl implements HttpServerRequest {
     if (handler != null) {
       handler.handle(null);
     }
+    // 通知body的回调
     if (body != null) {
       bodyPromise.tryComplete(body);
     }

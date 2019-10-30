@@ -36,6 +36,7 @@ public final class VertxEventLoopGroup extends AbstractEventExecutorGroup implem
     if (workers.isEmpty()) {
       throw new IllegalStateException();
     } else {
+      // 轮询法从works中选择worker
       EventLoop worker = workers.get(pos).worker;
       pos++;
       checkPos();
@@ -78,7 +79,9 @@ public final class VertxEventLoopGroup extends AbstractEventExecutorGroup implem
     return false;
   }
 
+  // 添加worker
   public synchronized void addWorker(EventLoop worker) {
+    // 获取worker，引用计数+1
     EventLoopHolder holder = findHolder(worker);
     if (holder == null) {
       workers.add(new EventLoopHolder(worker));
@@ -109,6 +112,7 @@ public final class VertxEventLoopGroup extends AbstractEventExecutorGroup implem
   private EventLoopHolder findHolder(EventLoop worker) {
     EventLoopHolder wh = new EventLoopHolder(worker);
     for (EventLoopHolder holder : workers) {
+      // 比较woker
       if (holder.equals(wh)) {
         return holder;
       }

@@ -50,6 +50,7 @@ import java.util.function.Function;
   private final VertxInternal vertx;
   private final SSLHelper sslHelper;
   private final HttpServerOptions options;
+  // http地址
   private final String serverOrigin;
   private final HttpServerMetrics metrics;
   private final boolean logEnabled;
@@ -81,6 +82,7 @@ import java.util.function.Function;
     ChannelPipeline pipeline = ch.pipeline();
     if (sslHelper.isSSL()) {
       ch.pipeline().addFirst("handshaker", new SslHandshakeCompletionHandler(ar -> {
+        /*连接成功后，SslHandshakeCompletionHandler会从pipeline中移出，通过该回调处理channel*/
         if (ar.succeeded()) {
           if (options.isUseAlpn()) {
             SslHandler sslHandler = pipeline.get(SslHandler.class);
@@ -88,6 +90,7 @@ import java.util.function.Function;
             if ("h2".equals(protocol)) {
               handleHttp2(ch);
             } else {
+              // 处理http1的channel
               handleHttp1(ch);
             }
           } else {
@@ -155,12 +158,16 @@ import java.util.function.Function;
     }
   }
 
+  // 处理http1的channel
   private void handleHttp1(Channel ch) {
+    // httpHandlerMgr::chooseHandler, 从handlerManager中选择handler
     HandlerHolder<? extends Handler<HttpServerConnection>> holder = connectionHandler.apply(ch.eventLoop());
     if (holder == null) {
+      // 返回503
       sendServiceUnavailable(ch);
       return;
     }
+    // pipeline添加handler
     configureHttp1OrH2C(ch.pipeline(), holder);
   }
 
@@ -218,8 +225,10 @@ import java.util.function.Function;
     if (HttpServerImpl.USE_FLASH_POLICY_HANDLER) {
       pipeline.addLast("flashpolicy", new FlashPolicyHandler());
     }
+    // 解码器、编码器
     pipeline.addLast("httpDecoder", new VertxHttpRequestDecoder(options));
     pipeline.addLast("httpEncoder", new VertxHttpResponseEncoder());
+    // 解压缩
     if (options.isDecompressionSupported()) {
       pipeline.addLast("inflater", new HttpContentDecompressor(false));
     }
@@ -234,14 +243,18 @@ import java.util.function.Function;
       pipeline.addLast("idle", new IdleStateHandler(0, 0, options.getIdleTimeout(), options.getIdleTimeoutUnit()));
     }
     if (disableH2C) {
+      // pipeline添加http1的VertxHandler
       configureHttp1(pipeline, holder);
     } else {
+      // upgrade
       pipeline.addLast("h2c", new Http1xUpgradeToH2CHandler(this, holder));
     }
   }
 
+  // pipeline添加http1的VertxHandler
   void configureHttp1(ChannelPipeline pipeline, HandlerHolder<? extends Handler<HttpServerConnection>> holder) {
     VertxHandler<Http1xServerConnection> handler = VertxHandler.create(holder.context, chctx -> {
+      // 创建Connection类封装context，并处理读取、异常等事件
       Http1xServerConnection conn = new Http1xServerConnection(holder.context.owner(),
         sslHelper,
         options,
@@ -256,6 +269,7 @@ import java.util.function.Function;
     if (metrics != null) {
       holder.context.executeFromIO(v -> conn.metric(metrics.connected(conn.remoteAddress(), conn.remoteName())));
     }
+    // 调用handler对connection进行加工，设置errorHandler和requestHandler（用户定义的）
     holder.context.executeFromIO(conn, holder.handler);
   }
 

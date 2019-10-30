@@ -482,15 +482,18 @@ public class HttpServerResponseImpl implements HttpServerResponse {
     }
   }
 
+  // 发送文件
   private void doSendFile(String filename, long offset, long length, Handler<AsyncResult<Void>> resultHandler) {
     synchronized (conn) {
       checkValid();
       if (headWritten) {
         throw new IllegalStateException("Head already written");
       }
+      // FileResolver解析文件
       File file = vertx.resolveFile(filename);
 
       if (!file.exists()) {
+        // 不存在,通知回调
         if (resultHandler != null) {
           ContextInternal ctx = vertx.getOrCreateContext();
           ctx.runOnContext((v) -> resultHandler.handle(Future.failedFuture(new FileNotFoundException())));
@@ -502,19 +505,23 @@ public class HttpServerResponseImpl implements HttpServerResponse {
 
       long contentLength = Math.min(length, file.length() - offset);
       bytesWritten = contentLength;
+      // 根据文件拓展名设置content-type
       if (!headers.contains(HttpHeaders.CONTENT_TYPE)) {
         String contentType = MimeMapping.getMimeTypeForFilename(filename);
         if (contentType != null) {
           headers.set(HttpHeaders.CONTENT_TYPE, contentType);
         }
       }
+      // 设置response响应头
       prepareHeaders(bytesWritten);
 
       ChannelFuture channelFuture;
       RandomAccessFile raf = null;
       try {
         raf = new RandomAccessFile(file, "r");
+        // 写入header
         conn.writeToChannel(new AssembledHttpResponse(head, version, status, headers));
+        // 发送文件, 分块传输或零拷贝方式发送
         channelFuture = conn.sendFile(raf, Math.min(offset, file.length()), contentLength);
       } catch (IOException e) {
         try {
@@ -534,13 +541,15 @@ public class HttpServerResponseImpl implements HttpServerResponse {
       written = true;
 
       ContextInternal ctx = vertx.getOrCreateContext();
+      // 发送完成后回调
       channelFuture.addListener(future -> {
-
+        // 发送成功后，写入EMPTY_LAST_CONTENT通知encoder响应写入完成
         // write an empty last content to let the http encoder know the response is complete
         if (future.isSuccess()) {
           ChannelPromise pr = conn.channelHandlerContext().newPromise();
           conn.writeToChannel(LastHttpContent.EMPTY_LAST_CONTENT, pr);
           if (!keepAlive) {
+            // 非keep-alive，写入完成后关闭连接
             pr.addListener(a -> {
               closeConnAfterWrite();
             });
@@ -548,6 +557,7 @@ public class HttpServerResponseImpl implements HttpServerResponse {
         }
 
         // signal completion handler when there is one
+        // 回调传入的handler
         if (resultHandler != null) {
           AsyncResult<Void> res;
           if (future.isSuccess()) {
@@ -559,6 +569,7 @@ public class HttpServerResponseImpl implements HttpServerResponse {
         }
 
         // signal body end handler
+        // 通知bodyEndHandler
         Handler<Void> handler;
         synchronized (conn) {
           handler = bodyEndHandler;
@@ -570,11 +581,13 @@ public class HttpServerResponseImpl implements HttpServerResponse {
         }
 
         // allow to write next response
+        // 处理下一个response
         conn.responseComplete();
       });
     }
   }
 
+  // 写入完成后关闭连接
   private void closeConnAfterWrite() {
     ChannelPromise channelFuture = conn.channelFuture();
     conn.writeToChannel(Unpooled.EMPTY_BUFFER, channelFuture);
@@ -633,6 +646,7 @@ public class HttpServerResponseImpl implements HttpServerResponse {
     }
   }
 
+  // 设置响应header
   private void prepareHeaders(long contentLength) {
     if (version == HttpVersion.HTTP_1_0 && keepAlive) {
       headers.set(HttpHeaders.CONNECTION, HttpHeaders.KEEP_ALIVE);

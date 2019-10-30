@@ -352,19 +352,22 @@ public abstract class ConnectionBase {
 
   /**
    * Send a file as a file region for zero copy transfer to the socket.
-   *
+   * 使用FileRegion发送文件，使用零拷贝发送到socket
+   * <p>
    * The implementation splits the file into multiple regions to avoid stalling the pipeline
    * and producing idle timeouts for very large files.
    *
-   * @param file the file to send
-   * @param offset the file offset
-   * @param length the file length
+   * @param file        the file to send
+   * @param offset      the file offset
+   * @param length      the file length
    * @param writeFuture the write future to be completed when the transfer is done or failed
    */
   private void sendFileRegion(RandomAccessFile file, long offset, long length, ChannelPromise writeFuture) {
+    // MAX_REGION_SIZE大小以内，直接发送整个文件
     if (length < MAX_REGION_SIZE) {
       writeToChannel(new DefaultFileRegion(file.getChannel(), offset, length), writeFuture);
     } else {
+      // 分多次发送
       ChannelPromise promise = chctx.newPromise();
       FileRegion region = new DefaultFileRegion(file.getChannel(), offset, MAX_REGION_SIZE);
       // Retain explicitly this file region so the underlying channel is not closed by the NIO channel when it
@@ -373,6 +376,7 @@ public abstract class ConnectionBase {
       writeToChannel(region, promise);
       promise.addListener(future -> {
         if (future.isSuccess()) {
+          // 发送剩余的文件
           sendFileRegion(file, offset + MAX_REGION_SIZE, length - MAX_REGION_SIZE, writeFuture);
         } else {
           log.error(future.cause().getMessage(), future.cause());
@@ -382,16 +386,21 @@ public abstract class ConnectionBase {
     }
   }
 
+  // 发送文件, 分块传输或零拷贝方式发送
   public final ChannelFuture sendFile(RandomAccessFile raf, long offset, long length) throws IOException {
     // Write the content.
     ChannelPromise writeFuture = chctx.newPromise();
+    // !ssl
     if (!supportsFileRegion()) {
       // Cannot use zero-copy
+      // 写入分块文件，无法使用零拷贝
       writeToChannel(new ChunkedFile(raf, offset, length, 8192), writeFuture);
     } else {
       // No encryption - use zero-copy.
+      // 不用支持ssl，则不需要加密，使用零拷贝
       sendFileRegion(raf, offset, length, writeFuture);
     }
+    // 关闭文件
     if (writeFuture != null) {
       writeFuture.addListener(fut -> raf.close());
     } else {

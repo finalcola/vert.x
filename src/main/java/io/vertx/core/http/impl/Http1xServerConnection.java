@@ -77,9 +77,11 @@ public class Http1xServerConnection extends Http1xConnectionBase<ServerWebSocket
   private long bytesRead;
   private long bytesWritten;
 
+  // 读取处理的请求
   private HttpServerRequestImpl requestInProgress;
   private HttpServerRequestImpl responseInProgress;
   private boolean channelPaused;
+  // 用户定义处理请求的handler，在connection初始化后通过回调设置
   private Handler<HttpServerRequest> requestHandler;
 
   final HttpServerMetrics metrics;
@@ -112,8 +114,10 @@ public class Http1xServerConnection extends Http1xConnectionBase<ServerWebSocket
     return metrics;
   }
 
+  // 处理读取的message
   public void handleMessage(Object msg) {
     if (msg instanceof HttpRequest) {
+      // 处理HttpRequest
       DefaultHttpRequest request = (DefaultHttpRequest) msg;
       if (request.decoderResult() != DecoderResult.SUCCESS) {
         handleError(request);
@@ -124,6 +128,7 @@ public class Http1xServerConnection extends Http1xConnectionBase<ServerWebSocket
         requestInProgress = req;
         if (responseInProgress != null) {
           // Deferred until the current response completion
+          // 推迟到当前的响应被处理后
           responseInProgress.enqueue(req);
           req.pause();
           return;
@@ -132,11 +137,13 @@ public class Http1xServerConnection extends Http1xConnectionBase<ServerWebSocket
         if (METRICS_ENABLED) {
           req.reportRequestBegin();
         }
+        // 开始处理请求,创建response对象，并检查是否需要返回100状态码
         req.handleBegin();
       }
       ContextInternal ctx = req.context;
       ContextInternal prev = ctx.beginDispatch();
       try {
+        // 处理请求
         requestHandler.handle(req);
       } catch (Throwable t) {
         ctx.reportException(t);
@@ -146,6 +153,7 @@ public class Http1xServerConnection extends Http1xConnectionBase<ServerWebSocket
     } else if (msg == LastHttpContent.EMPTY_LAST_CONTENT) {
       handleEnd();
     } else if (msg instanceof HttpContent) {
+      // 处理报文
       handleContent(msg);
     } else if (msg instanceof WebSocketFrame) {
       handleWsFrame((WebSocketFrame) msg);
@@ -158,14 +166,17 @@ public class Http1xServerConnection extends Http1xConnectionBase<ServerWebSocket
       handleError(content);
       return;
     }
+    // 封装报文
     Buffer buffer = Buffer.buffer(VertxHandler.safeBuffer(content.content(), chctx.alloc()));
     HttpServerRequestImpl request;
     synchronized (this) {
+      // 统计
       if (METRICS_ENABLED) {
         reportBytesRead(buffer);
       }
       request = requestInProgress;
     }
+    // 处理报文
     request.context.dispatch(v -> {
       request.handleContent(buffer);
     });
@@ -175,6 +186,7 @@ public class Http1xServerConnection extends Http1xConnectionBase<ServerWebSocket
     }
   }
 
+  // 请求结束，处理回调
   private void handleEnd() {
     HttpServerRequestImpl request;
     synchronized (this) {
@@ -189,6 +201,7 @@ public class Http1xServerConnection extends Http1xConnectionBase<ServerWebSocket
     });
   }
 
+  // 一次请求响应的流程处理完成，处理下次请求的响应
   synchronized void responseComplete() {
     if (METRICS_ENABLED) {
       reportResponseComplete();
@@ -202,10 +215,13 @@ public class Http1xServerConnection extends Http1xConnectionBase<ServerWebSocket
     }
   }
 
+  // 处理下个请求
   private void handleNext(HttpServerRequestImpl next) {
     responseInProgress = next;
+    // 创建response对象，并检查是否需要返回100状态码
     next.handleBegin();
     context.runOnContext(v -> {
+      // 唤醒缓存队列，继续接受数据
       next.resume();
       requestHandler.handle(next);
     });
@@ -406,6 +422,7 @@ public class Http1xServerConnection extends Http1xConnectionBase<ServerWebSocket
     }
   }
 
+  // 返回100 Continue
   void write100Continue() {
     chctx.writeAndFlush(new DefaultFullHttpResponse(HTTP_1_1, CONTINUE));
   }

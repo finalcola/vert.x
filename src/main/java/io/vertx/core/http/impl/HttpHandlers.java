@@ -52,9 +52,12 @@ public class HttpHandlers implements Handler<HttpServerConnection> {
     this.exceptionHandler = exceptionHandler;
   }
 
+  // 加工创建好的connection
   @Override
   public void handle(HttpServerConnection conn) {
+    // 保存channel和connection的对应关系
     server.connectionMap.put(conn.channel(), (ConnectionBase) conn);
+    // 添加hook，channel在关闭时从删除connectionMap
     conn.channel().closeFuture().addListener(fut -> {
       server.connectionMap.remove(conn.channel());
     });
@@ -62,16 +65,20 @@ public class HttpHandlers implements Handler<HttpServerConnection> {
     if (HttpServerImpl.DISABLE_WEBSOCKETS) {
       // As a performance optimisation you can set a system property to disable websockets altogether which avoids
       // some casting and a header check
+      // 优化：通过禁止WEBSOCKET，可以避免一些封装和请求头检查
     } else {
+      // 使用WebSocketRequestHandler进行封装，处理msg时，根据请求头判断调用的handler
       if (conn instanceof Http1xServerConnection) {
-        requestHandler =  new WebSocketRequestHandler(server.metrics, this);
+        requestHandler = new WebSocketRequestHandler(server.metrics, this);
         Http1xServerConnection c = (Http1xServerConnection) conn;
         initializeWebsocketExtensions(c.channelHandlerContext().pipeline());
       }
     }
     conn.exceptionHandler(exceptionHandler);
+    // 为connection设置requestHandler
     conn.handler(requestHandler);
     if (connectionHandler != null) {
+      // connection创建后的回调处理
       connectionHandler.handle(conn);
     }
   }

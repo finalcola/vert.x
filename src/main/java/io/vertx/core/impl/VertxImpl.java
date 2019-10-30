@@ -110,7 +110,7 @@ public class VertxImpl implements VertxInternal, MetricsProvider {
   private final DeploymentManager deploymentManager;
   // 用于文件资源读取
   private final FileResolver fileResolver;
-  private final Map<ServerID, HttpServerImpl> sharedHttpServers = new HashMap<>();
+  private final Map<ServerID/*host、port*/, HttpServerImpl> sharedHttpServers = new HashMap<>();
   private final Map<ServerID, NetServerImpl> sharedNetServers = new HashMap<>();
   // 封装线程池
   final WorkerPool workerPool;

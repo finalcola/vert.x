@@ -63,7 +63,9 @@ public class HttpServerImpl implements HttpServer, Closeable, MetricsProvider {
   // 创建server的context
   private final ContextInternal creatingContext;
   private final boolean disableH2c = Boolean.getBoolean(DISABLE_H2C_PROP_NAME);
+  // 保存channel和connection的对应关系
   final Map<Channel, ConnectionBase> connectionMap = new ConcurrentHashMap<>();
+  // worker eventLoop
   private final VertxEventLoopGroup availableWorkers = new VertxEventLoopGroup();
   private final HandlerManager<HttpHandlers> httpHandlerMgr = new HandlerManager<>(availableWorkers);
   private final HttpStreamHandler<ServerWebSocket> wsStream = new HttpStreamHandler<>();
@@ -94,6 +96,7 @@ public class HttpServerImpl implements HttpServer, Closeable, MetricsProvider {
 
   @Override
   public synchronized HttpServer requestHandler(Handler<HttpServerRequest> handler) {
+    // 用户设置的handler会被设置到requestStream中，并在connection处理请求时调用
     requestStream.handler(handler);
     return this;
   }
@@ -184,7 +187,8 @@ public class HttpServerImpl implements HttpServer, Closeable, MetricsProvider {
     return promise.future();
   }
 
-  private ChannelHandler childHandler(SocketAddress address, String serverOrigin) {
+  // 设置childHandler
+  private ChannelHandler childHandler(SocketAddress address, String serverOrigin/*http地址*/) {
     VertxMetrics vertxMetrics = vertx.metricsSPI();
     this.metrics = vertxMetrics != null ? vertxMetrics.createHttpServerMetrics(options, address) : null;
     return new HttpServerChannelInitializer(
@@ -194,8 +198,9 @@ public class HttpServerImpl implements HttpServer, Closeable, MetricsProvider {
       serverOrigin,
       metrics,
       disableH2c,
-      httpHandlerMgr::chooseHandler,
+      httpHandlerMgr::chooseHandler/*connectionHandler*/,
       eventLoop -> {
+        // errorHandler
         HandlerHolder<HttpHandlers> holder = httpHandlerMgr.chooseHandler(eventLoop);
         if (holder != null && holder.handler.exceptionHandler != null) {
           return new HandlerHolder<>(holder.context, holder.handler.exceptionHandler);
@@ -205,6 +210,7 @@ public class HttpServerImpl implements HttpServer, Closeable, MetricsProvider {
       }) {
       @Override
       protected void initChannel(Channel ch) {
+        // 无法继续创建channel，会关闭channel
         if (!requestStream.accept() || !wsStream.accept()) {
           ch.close();
         } else {
@@ -230,6 +236,7 @@ public class HttpServerImpl implements HttpServer, Closeable, MetricsProvider {
       applicationProtocols =  applicationProtocols.stream().filter(v -> v != HttpVersion.HTTP_2).collect(Collectors.toList());
     }
     sslHelper.setApplicationProtocols(applicationProtocols);
+    // 保存创建的server
     Map<ServerID, HttpServerImpl> sharedHttpServers = vertx.sharedHttpServers();
     synchronized (sharedHttpServers) {
       this.actualPort = port; // Will be updated on bind for a wildcard port
@@ -237,21 +244,29 @@ public class HttpServerImpl implements HttpServer, Closeable, MetricsProvider {
       HttpServerImpl shared = sharedHttpServers.get(id);
       if (shared == null || port == 0) {
         serverChannelGroup = new DefaultChannelGroup("vertx-acceptor-channels", GlobalEventExecutor.INSTANCE);
+        // 创建netty server
         ServerBootstrap bootstrap = new ServerBootstrap();
-        bootstrap.group(vertx.getAcceptorEventLoopGroup(), availableWorkers);
+        // 分组
+        bootstrap.group(vertx.getAcceptorEventLoopGroup(), availableWorkers/*eventLoopGroup*/);
+        // 配置ServerBootstrap
         applyConnectionOptions(address.path() != null, bootstrap);
         sslHelper.validate(vertx);
         String serverOrigin = (options.isSsl() ? "https" : "http") + "://" + host + ":" + port;
-        bootstrap.childHandler(childHandler(address, serverOrigin));
+        // 添加handler
+        bootstrap.childHandler(childHandler(address, serverOrigin/*网址，含http*/));
+        // 将当前类作为handler添加到httpHandlerMgr,会为connection设置handler
         addHandlers(this, listenContext);
         try {
+          // bind
           bindFuture = AsyncResolveConnectHelper.doBind(vertx, address, bootstrap);
           bindFuture.addListener(res -> {
             if (res.failed()) {
+              // 启动失败，删除该server
               synchronized (sharedHttpServers) {
                 sharedHttpServers.remove(id);
               }
             } else {
+              // 保存server channel
               Channel serverChannel = res.result();
               if (serverChannel.localAddress() instanceof InetSocketAddress) {
                 HttpServerImpl.this.actualPort = ((InetSocketAddress)serverChannel.localAddress()).getPort();
@@ -272,10 +287,12 @@ public class HttpServerImpl implements HttpServer, Closeable, MetricsProvider {
           listening = false;
           return this;
         }
+        // 保存server
         sharedHttpServers.put(id, this);
         actualServer = this;
       } else {
         // Server already exists with that host/port - we will use that
+        // 复用server，并添加handler
         actualServer = shared;
         this.actualPort = shared.actualPort;
         addHandlers(actualServer, listenContext);
@@ -284,6 +301,7 @@ public class HttpServerImpl implements HttpServer, Closeable, MetricsProvider {
       }
       actualServer.bindFuture.addListener(future -> {
         if (listenHandler != null) {
+          // 通知用于设置的listenHandler
           final AsyncResult<HttpServer> res;
           if (future.succeeded()) {
             res = Future.succeededFuture(HttpServerImpl.this);
@@ -293,6 +311,7 @@ public class HttpServerImpl implements HttpServer, Closeable, MetricsProvider {
           }
           listenContext.runOnContext((v) -> listenHandler.handle(res));
         } else if (future.failed()) {
+          // 记录
           listening  = false;
           if (metrics != null) {
             metrics.close();
@@ -415,7 +434,7 @@ public class HttpServerImpl implements HttpServer, Closeable, MetricsProvider {
     server.httpHandlerMgr.addHandler(
       new HttpHandlers(
         this,
-        requestStream.handler(),
+        requestStream.handler()/*用户设置的handler*/,
         wsStream.handler(),
         connectionHandler,
         exceptionHandler == null ? DEFAULT_EXCEPTION_HANDLER : exceptionHandler)
