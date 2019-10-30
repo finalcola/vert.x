@@ -61,6 +61,7 @@ public class HandlerManager<T> {
   // 添加handler
   public synchronized void addHandler(T handler, ContextInternal context) {
     EventLoop worker = context.nettyEventLoop();
+    // 添加worker
     availableWorkers.addWorker(worker);
     Handlers<T> handlers = new Handlers<>();
     Handlers<T> prev = handlerMap.putIfAbsent(worker, handlers);

@@ -33,34 +33,17 @@ import java.util.concurrent.CountDownLatch;
 public class HTTPExamples {
 
   public static void main(String[] args) throws InterruptedException {
-    CountDownLatch latch = new CountDownLatch(1);
     Vertx vertx = Vertx.vertx();
-    HttpClientOptions options = new HttpClientOptions();
-    HttpClient httpClient = vertx.createHttpClient(options);
-    HttpClientRequest request = httpClient.get("www.baidu.com", "/", res -> {
-      if (res.succeeded()) {
-        HttpClientResponse result = res.result();
-        result.body()
-          .map(String::valueOf)
-          .otherwise("null")
-          .setHandler(res2 -> {
-            if (res2.succeeded()) {
-              System.out.println(res2.result());
-              latch.countDown();
-            } else {
-              res2.cause().printStackTrace();
-              latch.countDown();
-            }
-          });
-      } else {
-        res.cause().printStackTrace();
-        latch.countDown();
-      }
-    });
-    request.end();
-    latch.await();
-    httpClient.close();
-    vertx.close(v -> System.out.println("closed..."));
+    HttpServerOptions options = new HttpServerOptions();
+    options.setPort(8888);
+    vertx.createHttpServer(options)
+      .connectionHandler((conn) -> {
+        System.out.println("connection created:" + conn.remoteAddress());
+      })
+      .requestHandler((req) -> {
+        req.response().end("hello");
+      })
+      .listen();
   }
 
   public void example1(Vertx vertx) {

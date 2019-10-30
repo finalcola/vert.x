@@ -63,6 +63,7 @@ public final class VertxHandler<C extends ConnectionBase> extends ChannelDuplexH
   }
 
   private final Function<ChannelHandlerContext, C> connectionFactory;
+  // 保存创建handler时的content，由该context处理消息
   private final ContextInternal context;
   private C conn;
   private Handler<C> addHandler;

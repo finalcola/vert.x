@@ -247,7 +247,7 @@ public class HttpServerImpl implements HttpServer, Closeable, MetricsProvider {
         // 创建netty server
         ServerBootstrap bootstrap = new ServerBootstrap();
         // 分组
-        bootstrap.group(vertx.getAcceptorEventLoopGroup(), availableWorkers/*eventLoopGroup*/);
+        bootstrap.group(vertx.getAcceptorEventLoopGroup()/*用于接收新连接的parentEventLoopGroup*/, availableWorkers/*eventLoopGroup*/);
         // 配置ServerBootstrap
         applyConnectionOptions(address.path() != null, bootstrap);
         sslHelper.validate(vertx);

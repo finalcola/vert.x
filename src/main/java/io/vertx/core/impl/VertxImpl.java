@@ -427,6 +427,7 @@ public class VertxImpl implements VertxInternal, MetricsProvider {
 
   @Override
   public ContextInternal createWorkerContext(Deployment deployment, WorkerPool workerPool, ClassLoader tccl) {
+    // 使用全局的workPool
     if (workerPool == null) {
       workerPool = this.workerPool;
     }
