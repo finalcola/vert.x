@@ -172,7 +172,7 @@ public class EventBusImpl implements EventBus, MetricsProvider {
     Objects.requireNonNull(handler, "handler");
     // 获取对应的MessageConsumer
     MessageConsumer<T> consumer = consumer(address);
-    // 绑定handler
+    // 绑定handler，并注册到eventBus
     consumer.handler(handler);
     return consumer;
   }
@@ -482,11 +482,15 @@ public class EventBusImpl implements EventBus, MetricsProvider {
       long timeout = options.getSendTimeout();
       // 创建唯一标识
       String replyAddress = generateReplyAddress();
+      // message设置回复地址
       message.setReplyAddress(replyAddress);
+      // handler注册信息
       HandlerRegistration<T> registration = new HandlerRegistration<>(vertx, metrics, this, replyAddress, message.address, true, src);
+      // 否则为ReplyHandler
       ReplyHandler<T> handler = new ReplyHandler<>(registration, timeout);
       // 设置回复处理方法
       handler.result.future().setHandler(replyHandler);
+      // 设置处理replyMessage的handler，并注册到eventBus
       registration.handler(handler);
       return handler;
     } else {

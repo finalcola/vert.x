@@ -31,35 +31,13 @@ public class EventBusExamples {
     Vertx vertx = Vertx.vertx();
 
     EventBus eventBus = vertx.eventBus();
-    Handler<Message<Object>> handler = new Handler<Message<Object>>() {
-      @Override
-      public void handle(Message<Object> event) {
-        System.out.println(event.body());
-        event.reply("world");
-      }
-    };
-    MessageConsumer<Object> consumer = eventBus.consumer("test");
-    consumer.handler(handler);
-    consumer.completionHandler(new Handler<AsyncResult<Void>>() {
-      @Override
-      public void handle(AsyncResult<Void> event) {
-        System.out.println(event.succeeded());
-      }
+    String address = "test";
+    eventBus.consumer(address, (Handler<Message<String>>) msg -> {
+      System.out.println("" + msg.body());
     });
-    consumer.endHandler((v) -> consumer.handler(handler));
-    consumer.exceptionHandler(null);
 
-    eventBus.request("test", "hello", event -> {
-      if (event.succeeded()) {
-        System.out.println(event.result().body());
-      } else {
-        System.out.println(event.cause());
-      }
-    });
-    eventBus.send("test", "hello2");
-
-//    eventBus.close(null);
-//    vertx.close();
+    eventBus.send(address, "msg1");
+    eventBus.send(address, "msg2");
   }
 
   public void example0_5(Vertx vertx) {
