@@ -196,7 +196,7 @@ abstract class AbstractContext implements ContextInternal {
 
   @Override
   public final <T> void executeFromIO(T value, Handler<T> task) {
-    // 检查运行的线程是否是FastThreadLocalThread或work类型的VertxThread
+    // 检查运行的线程是否是eventLoop,否则抛出异常
     if (THREAD_CHECKS) {
       checkEventLoopThread();
     }

@@ -155,7 +155,7 @@ abstract class ContextImpl extends AbstractContext {
     executeBlocking(this, blockingCodeHandler, resultHandler, workerPool, queue);
   }
 
-  // 使用workPool执行阻塞代码，在worker线程中执行
+  // 使用workPool执行阻塞代码，在worker线程中执行(回调会在context中执行)
   static <T> void executeBlocking(ContextInternal context, Handler<Promise<T>> blockingCodeHandler,
       Handler<AsyncResult<T>> resultHandler,
       WorkerPool workerPool, TaskQueue queue) {
@@ -183,6 +183,7 @@ abstract class ContextImpl extends AbstractContext {
           metrics.end(execMetric, fut.succeeded());
         }
         // 执行成功后调用endHandler或处理异常
+        //
         fut.setHandler(ar -> {
           if (resultHandler != null) {
             // 执行成功

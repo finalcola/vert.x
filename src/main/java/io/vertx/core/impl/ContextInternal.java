@@ -67,6 +67,7 @@ public interface ContextInternal extends Context {
    * current thread with the current context so {@link Vertx#currentContext()} returns this context.<p/>
    *
    * The caller thread should be the the event loop thread of this context.<p/>
+   * 执行的线程为context对应的EventLoop,非worker
    *
    * Any exception thrown from the {@literal task} will be reported on this context.
    *
@@ -84,7 +85,7 @@ public interface ContextInternal extends Context {
    * Schedule a task to be executed on this context, the task will be executed according to the
    * context concurrency model, on an event-loop context, the task is executed directly, on a worker
    * context the task is executed on the worker thread pool.
-   *
+   * eventLoopContext线程会直接执行，workerContext会将任务在线程池中顺序执行
    * @param value the task value
    * @param task the task
    */
@@ -98,6 +99,7 @@ public interface ContextInternal extends Context {
   /**
    * Dispatch a task on this context. The task is executed directly by the caller thread which must be a
    * {@link VertxThread}.
+   * 在当前线程中直接执行
    * <p>
    * The task execution is monitored by the blocked thread checker.
    * <p>

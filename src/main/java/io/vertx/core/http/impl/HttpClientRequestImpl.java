@@ -475,6 +475,7 @@ public class HttpClientRequestImpl extends HttpClientRequestBase implements Http
       } else {
         initializer = h2;
       }
+      // 创建context
       ContextInternal connectCtx = vertx.getOrCreateContext();
 
 

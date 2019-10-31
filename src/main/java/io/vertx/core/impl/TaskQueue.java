@@ -61,6 +61,7 @@ public class TaskQueue {
     for (; ; ) {
       final Task task;
       synchronized (tasks) {
+        // tasks中的任务会顺序执行
         task = tasks.poll();
         // 执行完成，返回
         if (task == null) {
@@ -75,7 +76,7 @@ public class TaskQueue {
           return;
         }
       }
-      // 直接执行
+      // 在当前线程池中执行
       try {
         task.runnable.run();
       } catch (Throwable t) {

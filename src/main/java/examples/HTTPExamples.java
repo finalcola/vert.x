@@ -34,16 +34,19 @@ public class HTTPExamples {
 
   public static void main(String[] args) throws InterruptedException {
     Vertx vertx = Vertx.vertx();
-    HttpServerOptions options = new HttpServerOptions();
-    options.setPort(8888);
-    vertx.createHttpServer(options)
-      .connectionHandler((conn) -> {
-        System.out.println("connection created:" + conn.remoteAddress());
-      })
-      .requestHandler((req) -> {
-        req.response().end("hello");
-      })
-      .listen();
+    HttpClient httpClient = vertx.createHttpClient();
+    CountDownLatch latch = new CountDownLatch(1);
+    httpClient.get("www.baidu.com", "/", res -> {
+      if (res.succeeded()) {
+        res.result().bodyHandler(buf -> {
+          System.out.println(buf);
+        });
+      }
+      latch.countDown();
+    }).end();
+    latch.await();
+    httpClient.close();
+    vertx.close();
   }
 
   public void example1(Vertx vertx) {
